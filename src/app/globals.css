@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+:root {
+  --app-bg: #1f241e;
+  --surface: #f7f1e3;
+  --ink: #20241d;
+  --ink-dim: #55594f;
+  --cheap: #3f7857;
+  --cheap-soft: #e2ece3;
+  --expensive: #c1502e;
+  --expensive-soft: #f3e1d8;
+  --neutral: #b08a22;
+  --rule: rgba(32, 36, 29, 0.14);
+}
+
+@theme inline {
+  --color-app-bg: var(--app-bg);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-ink-dim: var(--ink-dim);
+  --color-cheap: var(--cheap);
+  --color-cheap-soft: var(--cheap-soft);
+  --color-expensive: var(--expensive);
+  --color-expensive-soft: var(--expensive-soft);
+  --color-neutral: var(--neutral);
+  --font-sans: var(--font-noto-sans-kr);
+}
+
+body {
+  background: radial-gradient(120% 140% at 20% -10%, #2a3327 0%, #1f241e 55%) fixed;
+  color: var(--ink);
+  font-family: var(--font-noto-sans-kr), sans-serif;
+}
