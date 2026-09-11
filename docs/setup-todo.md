@@ -1,36 +1,38 @@
 # 남은 할 일
 
-## 1. 직접 발급받아야 하는 것 (제가 대신 계정을 만들 수 없어요)
+## 1. 직접 발급받아야 하는 것
 
-계정 생성/가입은 대리로 할 수 없는 영역이라, 아래는 본인이 직접 가입 후 키를 `.env.local`에 넣어주셔야 해요. (`.env.example`에 필요한 변수명 정리해둠)
-
-| 항목 | 어디서 | 왜 필요한지 | 넣을 곳 |
+| 항목 | 어디서 | 왜 필요한지 | 상태 |
 |---|---|---|---|
-| Supabase 프로젝트 | https://supabase.com → New Project (무료 티어) | 매일 KAMIS 데이터를 캐싱해둘 DB. 지금은 매 요청마다 KAMIS를 라이브 호출하고 있어서 느림(아래 3번 참고) | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` |
-| Google Cloud Vision API | https://console.cloud.google.com → Vision API 활성화 + 키 발급 (결제수단 등록 필요하지만 월 1,000건까지 무료) | 가격표 촬영 OCR | `GOOGLE_CLOUD_VISION_API_KEY` |
-| Vercel 계정 | https://vercel.com → GitHub 연동 | 배포 + Cron 스케줄 | (배포 시 대시보드에서 직접 환경변수 등록) |
+| KAMIS API 키 | 공공데이터포털 | 농산물/수산물 소매가격 수집 | ✅ 완료 |
+| Supabase 프로젝트 | https://supabase.com | 일별 가격 캐싱 DB | ✅ 완료 (조직/프로젝트 생성, 스키마 적용, 5개 품목 백필까지 끝) |
+| Vercel 계정 + 배포 | https://vercel.com | 배포 + Cron 스케줄 | ✅ 완료 (GitHub 연동, 자동배포, cron 등록) |
+| Google Cloud Vision API | https://console.cloud.google.com | 가격표 촬영 OCR | ⬜ 미착수 |
 
-Supabase 프로젝트를 만드셨으면, [docs/db-schema.sql](db-schema.sql)을 Supabase SQL Editor에 그대로 붙여넣어 실행하면 테이블이 생성돼요.
+Google Cloud Vision만 남았어요: 콘솔에서 Vision API 활성화 + 키 발급 후 알려주시면 이어서 연동할게요 (월 1,000건까지 무료).
 
-## 2. 오늘 밤 진행한 것
+## 2. 진행한 것 (누적)
 
-- KAMIS 실제 API 키로 라이브 연동 확인 (`src/lib/kamis/`)
-- **축산물은 실제로 데이터 0건 반환됨을 API 호출로 재확인** — MVP는 배추/양파/대파/무(농산물) + 고등어(수산물) 5개 품목으로 확정 (`src/lib/items.ts`)
-- 품목 상세 화면 구현: 오늘가격, 백분위 배지, 전년비교, 가격대 게이지, 90일 추이 그래프, 요일별 평균가(토·일 추정), 최근 90일 최저가 (`src/app/item/[itemId]/page.tsx`)
-- `npm run dev`로 실제 브라우저에서 5개 품목 전부 확인 완료
+- KAMIS API 실제 연동 — 축산물은 데이터 0건임을 API로 재확인, MVP는 배추/양파/대파/무(농산물) + 고등어(수산물) 5개 (`src/lib/items.ts`)
+- 품목 상세 화면: 오늘가격, 백분위 배지, 전년비교, 가격대 게이지, 90일 추이 그래프, 요일별 평균가(토·일 추정), 최근 90일 최저가
+- **Supabase 연동 완료**:
+  - 조직/프로젝트 CLI로 생성 (서울 리전), `supabase/migrations/`로 스키마 관리 (`items`, `daily_prices`, `sync_runs`)
+  - `src/lib/sync.ts` — KAMIS → 정규화 → Supabase upsert
+  - `src/app/api/cron/sync/route.ts` — 동기화 엔드포인트 (`CRON_SECRET`으로 보호)
+  - `vercel.json` — 매일 UTC 11시(KST 20시) 자동 실행되는 Vercel Cron 등록
+  - `src/lib/priceSummary.ts`를 라이브 KAMIS 호출 대신 **Supabase 읽기로 전환** → 응답속도 44초 → 0.9초로 개선
+  - 5개 품목 최근 400일치 백필 완료
+- Vercel 배포 완료, GitHub push 시 자동배포, 환경변수(KAMIS/Supabase/CRON_SECRET) 3개 환경 모두 등록
 
-## 3. 알아두어야 할 임시 상태 / 트레이드오프
+## 3. 알아두어야 할 트레이드오프
 
-- **지금은 DB 없이 매 요청마다 KAMIS를 라이브 호출**해요. 페이지네이션을 병렬화해서 44초 → 배추 기준 약 12초까지는 줄였지만, 여전히 실사용엔 너무 느립니다. Supabase 연동 전까지의 임시 상태이고, 원래 계획대로 DB 캐싱으로 넘어가면 이 문제는 사라져요 (`src/lib/priceSummary.ts`의 로직을 그대로 cron 배치로 옮기면 됨).
-- **품종/등급을 구분하지 않고 그날 조사된 모든 시장·품종의 평균**을 "오늘 가격"으로 계산했어요 (예: 배추의 "여름배추"와 "가을배추"가 섞여 조사되는 날엔 평균이 다소 튈 수 있음). MVP 단순화를 위한 선택이고, 필요하면 나중에 특정 품종/등급으로 고정할 수 있어요.
-- **전년동기 비교는 정확히 365일 전 날짜가 없으면 가장 가까운 날(최대 ±5일)로 대체**해요.
-- **가격 추이 그래프는 올해 실선만 표시**하고, 스펙에 있던 작년 점선(고스트) 라인과 명절 마커는 아직 안 넣었어요. 음력 변환 라이브러리 선정 + 작년 데이터 오버레이 로직이 남은 작업입니다.
-- **검색/OCR 화면은 아직 없고**, 홈 화면은 5개 품목을 나열한 리스트예요.
-- 방금 만든 코드는 아직 git에 커밋 안 했어요 (커밋은 명시적으로 요청하실 때만 하려고 남겨뒀습니다).
+- **품종/등급을 구분하지 않고 그날 조사된 모든 시장·품종의 평균**을 "오늘 가격"으로 계산 (MVP 단순화)
+- **전년동기 비교는 정확히 365일 전 날짜가 없으면 가장 가까운 날(최대 ±5일)로 대체**
+- **가격 추이 그래프는 올해 실선만 표시** — 작년 점선(고스트) 라인, 명절 마커는 아직 미구현 (음력 변환 라이브러리 선정 필요)
+- **검색/OCR 화면은 아직 없고**, 홈 화면은 5개 품목 리스트
 
 ## 4. 추천하는 다음 순서
 
-1. Supabase 프로젝트 생성 → `db-schema.sql` 실행 → cron으로 매일 수집하는 배치 스크립트 작성 (지금의 라이브 호출 로직을 그대로 재사용 가능)
+1. Google Cloud Vision 연동 → OCR 검색 화면
 2. 가격 추이 그래프에 작년 점선 라인 + 명절 마커 추가
-3. Google Cloud Vision 연동해서 OCR 검색 화면 구현
-4. Vercel 배포
+3. 품목 확대, 축평원(축산물) 연동 검토

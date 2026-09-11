@@ -1,9 +1,8 @@
 -- 농수산물 가격 판단 앱 — DB 스키마 (Postgres / Supabase)
 -- 설계 원칙: KAMIS/축평원 등 데이터 소스가 여러 개여도, daily_prices 이후의
 -- 계산 로직(백분위, 요일평균, 전년비교)은 소스를 전혀 몰라도 되게 정규화한다.
---
--- 이 파일은 최초 설계 스냅샷이고, 실제 적용 이력(변경분 포함)은
--- supabase/migrations/ 가 정본이다. 스키마를 바꿀 땐 새 migration을 추가할 것.
+
+create extension if not exists pgcrypto;
 
 create type item_category as enum ('농산물', '수산물', '축산물');
 create type price_source as enum ('kamis', 'ekape');
@@ -11,7 +10,6 @@ create type price_source as enum ('kamis', 'ekape');
 -- 품목 마스터
 create table items (
   id            uuid primary key default gen_random_uuid(),
-  slug          text unique,                    -- 앱 코드(src/lib/items.ts)가 쓰는 안정 식별자, 예: "napa-cabbage"
   name          text not null,                  -- 표시명, 예: "삼겹살(냉장)"
   category      item_category not null,
   unit_label    text not null,                  -- 표시용, 예: "100g 기준"
