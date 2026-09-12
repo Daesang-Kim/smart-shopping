@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { MVP_ITEMS } from "@/lib/items";
+import { BROWSABLE_ITEMS } from "@/lib/catalog";
 
 export async function GET() {
   return NextResponse.json({
-    items: MVP_ITEMS.map(({ id, name, category }) => ({ id, name, category })),
+    items: BROWSABLE_ITEMS.map(({ slug, name, category }) => ({ slug, name, category })),
   });
 }

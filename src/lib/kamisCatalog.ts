@@ -1,4 +1,4 @@
-import type { ItemCategory } from "./items";
+export type ItemCategory = "농산물" | "수산물" | "축산물";
 
 export interface CatalogEntry {
   ctgryCode: string; // 부류코드

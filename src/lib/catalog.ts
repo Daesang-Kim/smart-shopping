@@ -1,15 +1,16 @@
-import type { ItemCategory } from "./items";
-import { MVP_ITEMS } from "./items";
-import { KAMIS_CATALOG } from "./kamisCatalog";
+import { KAMIS_CATALOG, type ItemCategory } from "./kamisCatalog";
 
 export interface BrowsableItem {
-  key: string; // `${ctgryCode}:${itemCode}` — 즐겨찾기/리스트 키로 사용하는 고유 식별자
+  slug: string; // `${ctgryCode}-${itemCode}` — URL 파라미터이자 DB items.slug로 그대로 씀
+  ctgryCode: string;
+  itemCode: string;
   name: string;
   category: ItemCategory;
-  slug: string | null; // MVP_ITEMS에 있으면 /item/[slug]로 이동 가능, 없으면 아직 미지원
 }
 
-// KAMIS 품목코드표 전체(123개)를 화면에 보여줄 형태로 정규화한다.
+// KAMIS 품목코드표 전체(123개)를 화면/URL에서 쓸 형태로 정규화한다.
+// 모든 품목이 클릭 가능하다 — 처음 조회하는 품목은 그 자리에서 KAMIS를 호출해 캐싱하고
+// (lib/sync.ts의 syncItem), 이후부터는 캐시를 읽으므로 빨라진다.
 // 이름이 중복되는 코드(예: 브로콜리 261/280)는 첫 번째 것만 남긴다.
 const seenNames = new Set<string>();
 export const BROWSABLE_ITEMS: BrowsableItem[] = [];
@@ -18,16 +19,15 @@ for (const entry of KAMIS_CATALOG) {
   if (seenNames.has(entry.name)) continue;
   seenNames.add(entry.name);
 
-  const mvpItem = MVP_ITEMS.find(
-    (item) =>
-      item.sourceParams.ctgryCode === entry.ctgryCode &&
-      item.sourceParams.itemCode === entry.itemCode,
-  );
-
   BROWSABLE_ITEMS.push({
-    key: `${entry.ctgryCode}:${entry.itemCode}`,
+    slug: `${entry.ctgryCode}-${entry.itemCode}`,
+    ctgryCode: entry.ctgryCode,
+    itemCode: entry.itemCode,
     name: entry.name,
     category: entry.category,
-    slug: mvpItem?.id ?? null,
   });
+}
+
+export function findCatalogItem(slug: string): BrowsableItem | undefined {
+  return BROWSABLE_ITEMS.find((item) => item.slug === slug);
 }

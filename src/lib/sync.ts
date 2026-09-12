@@ -1,5 +1,5 @@
 import { getSupabaseServerClient } from "./supabase";
-import { MVP_ITEMS, type Item } from "./items";
+import type { BrowsableItem } from "./catalog";
 import { fetchKamisDailyPrices } from "./kamis/client";
 import { normalizeToDailyPrices } from "./normalize";
 import { addDays, toYyyymmdd } from "./date";
@@ -10,12 +10,18 @@ function yyyymmddToIso(value: string): string {
 
 export interface SyncItemResult {
   slug: string;
+  itemId: string;
+  unitLabel: string;
   rowsWritten: number;
 }
 
 // 품목 하나에 대해: KAMIS에서 가져와 정규화 → items/daily_prices에 upsert.
 // item_id+price_date가 유니크라서, 같은 날짜를 다시 수집해도 덮어쓸 뿐 중복이 쌓이지 않는다.
-export async function syncItem(item: Item): Promise<SyncItemResult> {
+// 이 함수는 두 곳에서 호출된다: ①매일 cron이 "이미 수집된 품목"을 갱신할 때
+// ②사용자가 처음 조회하는 품목을 그 자리에서 즉시 캐싱할 때(lib/priceSummary.ts)
+export async function syncItem(
+  entry: Pick<BrowsableItem, "slug" | "name" | "category" | "ctgryCode" | "itemCode">,
+): Promise<SyncItemResult> {
   const supabase = getSupabaseServerClient();
 
   const today = new Date();
@@ -23,14 +29,14 @@ export async function syncItem(item: Item): Promise<SyncItemResult> {
   const endDate = toYyyymmdd(today);
 
   const rows = await fetchKamisDailyPrices({
-    ctgryCode: item.sourceParams.ctgryCode,
-    itemCode: item.sourceParams.itemCode,
+    ctgryCode: entry.ctgryCode,
+    itemCode: entry.itemCode,
     startDate,
     endDate,
   });
   const daily = normalizeToDailyPrices(rows);
   if (daily.length === 0) {
-    throw new Error(`${item.name}: KAMIS 데이터가 없습니다.`);
+    throw new Error(`${entry.name}: KAMIS 데이터가 없습니다.`);
   }
 
   const unitLabel = daily[daily.length - 1].unit;
@@ -39,12 +45,12 @@ export async function syncItem(item: Item): Promise<SyncItemResult> {
     .from("items")
     .upsert(
       {
-        slug: item.id,
-        name: item.name,
-        category: item.category,
+        slug: entry.slug,
+        name: entry.name,
+        category: entry.category,
         unit_label: unitLabel,
-        source: item.source,
-        source_params: item.sourceParams,
+        source: "kamis",
+        source_params: { ctgryCode: entry.ctgryCode, itemCode: entry.itemCode },
         is_active: true,
       },
       { onConflict: "slug" },
@@ -53,7 +59,7 @@ export async function syncItem(item: Item): Promise<SyncItemResult> {
     .single();
 
   if (itemError || !itemRow) {
-    throw new Error(`${item.name}: items upsert 실패 - ${itemError?.message}`);
+    throw new Error(`${entry.name}: items upsert 실패 - ${itemError?.message}`);
   }
 
   const priceRows = daily.map((d) => ({
@@ -67,10 +73,15 @@ export async function syncItem(item: Item): Promise<SyncItemResult> {
     .upsert(priceRows, { onConflict: "item_id,price_date" });
 
   if (priceError) {
-    throw new Error(`${item.name}: daily_prices upsert 실패 - ${priceError.message}`);
+    throw new Error(`${entry.name}: daily_prices upsert 실패 - ${priceError.message}`);
   }
 
-  return { slug: item.id, rowsWritten: priceRows.length };
+  return {
+    slug: entry.slug,
+    itemId: itemRow.id as string,
+    unitLabel,
+    rowsWritten: priceRows.length,
+  };
 }
 
 export interface SyncAllResult {
@@ -78,22 +89,49 @@ export interface SyncAllResult {
   errors: { slug: string; message: string }[];
 }
 
-export async function syncAllItems(): Promise<SyncAllResult> {
+interface ItemRow {
+  slug: string;
+  name: string;
+  category: BrowsableItem["category"];
+  source_params: { ctgryCode: string; itemCode: string };
+}
+
+// 매일 cron이 호출 — MVP 고정 목록이 아니라, 그동안 사용자가 조회해서
+// "이미 DB에 쌓인" 품목들만 갱신한다. 조회된 적 없는 품목은 손대지 않는다.
+export async function syncAllActiveItems(): Promise<SyncAllResult> {
+  const supabase = getSupabaseServerClient();
+
+  const { data: existingItems, error: listError } = await supabase
+    .from("items")
+    .select("slug, name, category, source_params")
+    .eq("is_active", true);
+
+  if (listError) {
+    throw new Error(`활성 품목 조회 실패: ${listError.message}`);
+  }
+
   const results: SyncItemResult[] = [];
   const errors: { slug: string; message: string }[] = [];
 
-  for (const item of MVP_ITEMS) {
+  for (const row of (existingItems ?? []) as ItemRow[]) {
     try {
-      results.push(await syncItem(item));
+      results.push(
+        await syncItem({
+          slug: row.slug,
+          name: row.name,
+          category: row.category,
+          ctgryCode: row.source_params.ctgryCode,
+          itemCode: row.source_params.itemCode,
+        }),
+      );
     } catch (err) {
       errors.push({
-        slug: item.id,
+        slug: row.slug,
         message: err instanceof Error ? err.message : String(err),
       });
     }
   }
 
-  const supabase = getSupabaseServerClient();
   const status = errors.length === 0 ? "success" : results.length === 0 ? "failed" : "partial";
   await supabase.from("sync_runs").insert({
     source: "kamis",

@@ -1,6 +1,7 @@
 import { getSupabaseServerClient } from "./supabase";
-import type { Item } from "./items";
+import type { BrowsableItem } from "./catalog";
 import type { DailyPrice } from "./normalize";
+import { syncItem } from "./sync";
 import {
   last90Days,
   percentileBadge,
@@ -23,19 +24,27 @@ export interface PriceSummary {
   series90: DailyPrice[];
 }
 
-// Supabase(daily_prices)에 cron이 미리 캐싱해둔 데이터를 읽어서 통계를 계산한다.
-// KAMIS 라이브 호출은 src/lib/sync.ts(cron)에서만 일어나고, 앱은 항상 DB만 본다.
-export async function getPriceSummary(item: Item): Promise<PriceSummary> {
+// Supabase(daily_prices)에 캐싱된 데이터를 읽어서 통계를 계산한다.
+// 처음 조회하는 품목(=DB에 아직 없는 품목)은 이 자리에서 즉시 KAMIS를 호출해 캐싱한 뒤
+// 이어서 통계를 계산한다 — 그래서 최초 1회만 느리고, 이후 방문부터는 DB만 읽어 빠르다.
+export async function getPriceSummary(entry: BrowsableItem): Promise<PriceSummary> {
   const supabase = getSupabaseServerClient();
 
-  const { data: itemRow, error: itemError } = await supabase
+  const { data: existingRow } = await supabase
     .from("items")
     .select("id, unit_label")
-    .eq("slug", item.id)
-    .single();
+    .eq("slug", entry.slug)
+    .maybeSingle();
 
-  if (itemError || !itemRow) {
-    throw new Error(`"${item.name}" 데이터가 아직 수집되지 않았습니다. (cron 동기화 필요)`);
+  // 캐시에 없으면(=처음 조회하는 품목) 그 자리에서 즉시 수집한다. syncItem이 방금 만든
+  // 행의 id를 직접 돌려주므로, 별도 재조회 없이 바로 이어서 쓴다(재조회는 일시적 네트워크
+  // 오류에도 취약해서 제거함).
+  let itemRow: { id: string; unit_label: string };
+  if (existingRow) {
+    itemRow = existingRow;
+  } else {
+    const synced = await syncItem(entry);
+    itemRow = { id: synced.itemId, unit_label: synced.unitLabel };
   }
 
   const { data: priceRows, error: priceError } = await supabase
@@ -48,7 +57,7 @@ export async function getPriceSummary(item: Item): Promise<PriceSummary> {
     throw new Error(priceError.message);
   }
   if (!priceRows || priceRows.length === 0) {
-    throw new Error(`"${item.name}" 가격 데이터가 없습니다.`);
+    throw new Error(`"${entry.name}" 가격 데이터가 없습니다.`);
   }
 
   const daily: DailyPrice[] = priceRows.map((row) => ({
@@ -61,7 +70,7 @@ export async function getPriceSummary(item: Item): Promise<PriceSummary> {
   const window90 = last90Days(daily);
 
   return {
-    item: { id: item.id, name: item.name, category: item.category, unit: itemRow.unit_label },
+    item: { id: entry.slug, name: entry.name, category: entry.category, unit: itemRow.unit_label },
     today: { date: latest.date, price: latest.price },
     percentile: percentileBadge(window90, latest.price),
     range90: priceRange(window90),

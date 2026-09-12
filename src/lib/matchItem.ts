@@ -1,5 +1,5 @@
 import { BROWSABLE_ITEMS, type BrowsableItem } from "./catalog";
-import type { ItemCategory } from "./items";
+import type { ItemCategory } from "./kamisCatalog";
 
 function levenshtein(a: string, b: string): number {
   const dp: number[][] = Array.from({ length: a.length + 1 }, (_, i) =>
@@ -25,7 +25,7 @@ export interface MatchCandidate {
   name: string;
   category: ItemCategory;
   score: number; // 0~100, 높을수록 잘 맞음
-  slug: string | null; // 지원되는 품목이면 /item/[slug]로 연결 가능, 아니면 null
+  slug: string; // /item/[slug]로 바로 연결 가능 (처음 조회하는 품목이면 그 자리에서 캐싱됨)
 }
 
 function scoreEntry(entry: BrowsableItem, haystack: string): number {

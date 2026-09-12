@@ -5,45 +5,41 @@
 | 항목 | 어디서 | 왜 필요한지 | 상태 |
 |---|---|---|---|
 | KAMIS API 키 | 공공데이터포털 | 농산물/수산물 소매가격 수집 | ✅ 완료 |
-| Supabase 프로젝트 | https://supabase.com | 일별 가격 캐싱 DB | ✅ 완료 (조직/프로젝트 생성, 스키마 적용, 5개 품목 백필까지 끝) |
+| Supabase 프로젝트 | https://supabase.com | 일별 가격 캐싱 DB | ✅ 완료 |
 | Vercel 계정 + 배포 | https://vercel.com | 배포 + Cron 스케줄 | ✅ 완료 (GitHub 연동, 자동배포, cron 등록) |
 | Google Cloud Vision API | https://console.cloud.google.com | 가격표 촬영 OCR | ✅ 완료 (전용 GCP 프로젝트 `smart-shopping-82693`, 결제 연결, Vision 전용 제한 키) |
 
-발급이 필요한 항목은 모두 끝났어요. 다음은 기능 보완 작업만 남았습니다 (아래 4번).
+발급이 필요한 항목은 모두 끝났어요.
 
-## 2. 진행한 것 (누적)
+## 2. 핵심 아키텍처: 지연 수집(lazy backfill)
 
-- KAMIS API 실제 연동 — 축산물은 데이터 0건임을 API로 재확인, MVP는 배추/양파/대파/무(농산물) + 고등어(수산물) 5개 (`src/lib/items.ts`)
+처음엔 배추/양파/대파/무/고등어 5개만 하드코딩해서 데이터를 수집했는데, **KAMIS가 제공하는 123개 품목 전부를 지원하도록 바뀌었어요.** 123개를 한꺼번에 백필하는 대신:
+
+- `src/lib/catalog.ts`의 `BROWSABLE_ITEMS`(123개, 이름 중복 제거)가 전체 카탈로그이고, 모든 품목이 `/item/[ctgryCode-itemCode]`로 클릭 가능함
+- **사용자가 처음 클릭하는 품목만 그 자리에서 KAMIS를 호출해 Supabase에 캐싱**하고(`src/lib/priceSummary.ts` → `src/lib/sync.ts`의 `syncItem`), 이후 방문부터는 캐시를 읽어 빠름 (최초 1회 ~5~18초, 이후 ~0.3초)
+- 매일 도는 cron(`src/app/api/cron/sync/route.ts` → `syncAllActiveItems`)은 고정 목록이 아니라 **그동안 실제로 조회돼서 DB에 쌓인 품목들만** 갱신함 — 사용량에 따라 자연스럽게 커버리지가 늘어남
+- "미지원" 개념은 완전히 없앴음 — 모든 품목이 목록/검색/OCR 어디서든 클릭하면 동작함
+
+## 3. 진행한 것 (누적)
+
+- KAMIS API 실제 연동 — 축산물은 데이터 0건임을 API로 재확인, 지원 범위는 농산물+수산물 123개
 - 품목 상세 화면: 오늘가격, 백분위 배지, 전년비교, 가격대 게이지, 90일 추이 그래프, 요일별 평균가(토·일 추정), 최근 90일 최저가
-- **Supabase 연동 완료**:
-  - 조직/프로젝트 CLI로 생성 (서울 리전), `supabase/migrations/`로 스키마 관리 (`items`, `daily_prices`, `sync_runs`)
-  - `src/lib/sync.ts` — KAMIS → 정규화 → Supabase upsert
-  - `src/app/api/cron/sync/route.ts` — 동기화 엔드포인트 (`CRON_SECRET`으로 보호)
-  - `vercel.json` — 매일 UTC 11시(KST 20시) 자동 실행되는 Vercel Cron 등록
-  - `src/lib/priceSummary.ts`를 라이브 KAMIS 호출 대신 **Supabase 읽기로 전환** → 응답속도 44초 → 0.9초로 개선
-  - 5개 품목 최근 400일치 백필 완료
-- Vercel 배포 완료, GitHub push 시 자동배포, 환경변수(KAMIS/Supabase/CRON_SECRET/Vision) 3개 환경 모두 등록
-- **OCR 검색 구현 완료**:
-  - `src/lib/ocr.ts` — Google Cloud Vision TEXT_DETECTION 호출
-  - `src/lib/kamisCatalog.ts` — KAMIS 품목코드표 전체(123개, 축산물 제외) 하드코딩. OCR 매칭은 MVP 5개가 아니라 **이 전체 카탈로그**를 대상으로 함
-  - `src/lib/matchItem.ts` — OCR 텍스트와 품목명을 편집거리 기반으로 유사도 매칭, 후보 최대 3개 제시. MVP_ITEMS에 없는 품목은 `slug: null`로 표시(상세화면 미지원)
-  - 실제 이미지로 종단간 테스트 완료: "양파(국산) 1,890원" → 양파 100%, 대파 50% 순으로 정확히 매칭
-- **홈 화면을 검색 우선 구조로 재설계**:
-  - `src/lib/catalog.ts` — KAMIS 전체 품목(123개, 이름 중복 제거)을 화면용으로 정규화
-  - `src/components/ItemBrowser.tsx` — 텍스트 검색이 기본, 카메라(OCR)는 검색창 옆 아이콘 버튼(사이드 옵션)으로 축소 (`OcrSearch.tsx`는 이 컴포넌트로 흡수되어 삭제)
-  - `src/lib/useFavorites.ts` — 즐겨찾기를 localStorage에 저장(계정 없이 기기별로 관리), `useSyncExternalStore`로 SSR 하이드레이션 불일치 없이 구현
-  - 목록 정렬 우선순위: 즐겨찾기 > 지원되는(상세화면 있는) 품목 > 나머지. 즐겨찾기는 품목 리스트에서 별 아이콘 클릭으로 바로 토글
+- Supabase 연동 — 조직/프로젝트 CLI로 생성(서울 리전), `supabase/migrations/`로 스키마 관리 (`items`, `daily_prices`, `sync_runs`)
+- Vercel 배포 — GitHub push 시 자동배포, 환경변수(KAMIS/Supabase/CRON_SECRET/Vision) 3개 환경 모두 등록
+- OCR 검색 — Google Cloud Vision TEXT_DETECTION(`src/lib/ocr.ts`) + 편집거리 기반 유사도 매칭(`src/lib/matchItem.ts`)으로 전체 카탈로그 대상 인식, 후보 최대 3개 제시
+- 홈 화면 재설계 — 텍스트 검색이 기본, 카메라(OCR)는 검색창 옆 아이콘 버튼(사이드 옵션). 즐겨찾기는 `localStorage`에 저장(계정 없이 기기별 관리, `useSyncExternalStore`로 하이드레이션 이슈 없이 구현), 별 아이콘으로 토글하면 목록 최상단 고정
+- 지연 수집 아키텍처로 전환 — 위 2번 참고
 
-## 3. 알아두어야 할 트레이드오프
+## 4. 알아두어야 할 트레이드오프
 
-- **품종/등급을 구분하지 않고 그날 조사된 모든 시장·품종의 평균**을 "오늘 가격"으로 계산 (MVP 단순화)
+- **품종/등급을 구분하지 않고 그날 조사된 모든 시장·품종의 평균**을 "오늘 가격"으로 계산 (단순화)
 - **전년동기 비교는 정확히 365일 전 날짜가 없으면 가장 가까운 날(최대 ±5일)로 대체**
 - **가격 추이 그래프는 올해 실선만 표시** — 작년 점선(고스트) 라인, 명절 마커는 아직 미구현 (음력 변환 라이브러리 선정 필요)
-- **OCR 매칭은 편집거리 기반의 단순 알고리즘** — 품목이 5개뿐이라 충분하지만, 품목이 늘어나면 자모 단위 매칭 등으로 고도화 필요
+- **처음 조회하는 품목은 로딩이 몇 초 걸림** (`item/[itemId]/loading.tsx`로 안내 문구 표시) — KAMIS 라이브 호출이 필요해서 구조적으로 피할 수 없음
 - Google Cloud Vision 키는 **smart-shopping-82693이라는 별도 GCP 프로젝트**에 결제가 연결되어 있음 — 다른 프로젝트(MenoWebApp 등)와 무관
 
-## 4. 추천하는 다음 순서
+## 5. 추천하는 다음 순서
 
 1. 가격 추이 그래프에 작년 점선 라인 + 명절 마커 추가
-2. 품목 확대, 축평원(축산물) 연동 검토
-3. OCR 매칭 정확도 개선 (품목 늘어날 경우)
+2. 축평원(축산물) 연동 검토
+3. OCR/검색 매칭 정확도 개선 (품목이 더 늘어날 경우 자모 단위 매칭 등)

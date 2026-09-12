@@ -1,8 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { findItem } from "@/lib/items";
+import { findCatalogItem } from "@/lib/catalog";
 import { getPriceSummary } from "@/lib/priceSummary";
 import { parseYyyymmdd, formatKoreanDate } from "@/lib/date";
+
+// 처음 조회하는 품목은 이 자리에서 KAMIS 라이브 호출 + Supabase 저장까지 하므로
+// 기본 함수 제한시간(짧음)보다 여유를 둔다.
+export const maxDuration = 60;
 
 function badgeColorClass(label: "비싼 편" | "저렴한 편" | "보통") {
   if (label === "비싼 편") return "bg-expensive-soft text-expensive";
@@ -32,7 +36,7 @@ export default async function ItemDetailPage({
   params: Promise<{ itemId: string }>;
 }) {
   const { itemId } = await params;
-  const item = findItem(itemId);
+  const item = findCatalogItem(itemId);
   if (!item) notFound();
 
   let errorMessage: string | null = null;

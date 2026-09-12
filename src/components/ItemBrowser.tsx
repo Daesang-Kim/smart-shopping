@@ -10,7 +10,7 @@ interface OcrCandidate {
   name: string;
   category: string;
   score: number;
-  slug: string | null;
+  slug: string;
 }
 
 export default function ItemBrowser() {
@@ -28,8 +28,8 @@ export default function ItemBrowser() {
       : BROWSABLE_ITEMS;
 
     return [...base].sort((a, b) => {
-      const favA = isFavorite(a.key) ? 0 : 1;
-      const favB = isFavorite(b.key) ? 0 : 1;
+      const favA = isFavorite(a.slug) ? 0 : 1;
+      const favB = isFavorite(b.slug) ? 0 : 1;
       return favA - favB;
     });
   }, [query, isFavorite]);
@@ -109,28 +109,16 @@ export default function ItemBrowser() {
             </p>
           ) : (
             <div className="flex flex-col gap-2">
-              {ocrCandidates.map((c) =>
-                c.slug ? (
-                  <Link
-                    key={c.name}
-                    href={`/item/${c.slug}`}
-                    className="bg-cheap-soft rounded-xl px-4 py-2.5 flex items-center justify-between"
-                  >
-                    <span className="font-bold text-ink">{c.name}</span>
-                    <span className="text-xs text-ink-dim">일치도 {c.score}%</span>
-                  </Link>
-                ) : (
-                  <div
-                    key={c.name}
-                    className="bg-surface/60 rounded-xl px-4 py-2.5 flex items-center justify-between opacity-70"
-                  >
-                    <span className="font-bold text-ink-dim">{c.name}</span>
-                    <span className="text-[11px] text-ink-dim">
-                      일치도 {c.score}% · 아직 미지원 품목
-                    </span>
-                  </div>
-                ),
-              )}
+              {ocrCandidates.map((c) => (
+                <Link
+                  key={c.slug}
+                  href={`/item/${c.slug}`}
+                  className="bg-cheap-soft rounded-xl px-4 py-2.5 flex items-center justify-between"
+                >
+                  <span className="font-bold text-ink">{c.name}</span>
+                  <span className="text-xs text-ink-dim">일치도 {c.score}%</span>
+                </Link>
+              ))}
             </div>
           )}
         </div>
@@ -139,10 +127,10 @@ export default function ItemBrowser() {
       <div className="flex flex-col gap-2">
         {visibleItems.map((item) => (
           <ItemRow
-            key={item.key}
+            key={item.slug}
             item={item}
-            favorite={isFavorite(item.key)}
-            onToggleFavorite={() => toggle(item.key)}
+            favorite={isFavorite(item.slug)}
+            onToggleFavorite={() => toggle(item.slug)}
           />
         ))}
       </div>
@@ -159,47 +147,26 @@ function ItemRow({
   favorite: boolean;
   onToggleFavorite: () => void;
 }) {
-  const content = (
-    <>
-      <div className="flex items-center gap-2">
-        {item.slug && (
-          <button
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onToggleFavorite();
-            }}
-            className="text-lg leading-none"
-            aria-label="즐겨찾기"
-          >
-            {favorite ? "⭐" : "☆"}
-          </button>
-        )}
-        <span className={`font-bold text-lg ${item.slug ? "text-ink" : "text-ink-dim"}`}>
-          {item.name}
-        </span>
-      </div>
-      <span className="text-xs text-ink-dim">
-        {item.category}
-        {!item.slug && " · 미지원"}
-      </span>
-    </>
-  );
-
-  if (!item.slug) {
-    return (
-      <div className="bg-surface/60 rounded-2xl px-5 py-4 flex items-center justify-between opacity-60">
-        {content}
-      </div>
-    );
-  }
-
   return (
     <Link
       href={`/item/${item.slug}`}
       className="bg-surface rounded-2xl px-5 py-4 flex items-center justify-between shadow-lg hover:opacity-90 transition"
     >
-      {content}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onToggleFavorite();
+          }}
+          className="text-lg leading-none"
+          aria-label="즐겨찾기"
+        >
+          {favorite ? "⭐" : "☆"}
+        </button>
+        <span className="font-bold text-lg text-ink">{item.name}</span>
+      </div>
+      <span className="text-xs text-ink-dim">{item.category}</span>
     </Link>
   );
 }
