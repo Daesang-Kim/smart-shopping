@@ -20,8 +20,7 @@ export default function ItemBrowser() {
   const [ocrError, setOcrError] = useState("");
   const { toggle, isFavorite } = useFavorites();
 
-  // 정렬 우선순위: 즐겨찾기 > 지원되는(상세화면 있는) 품목 > 나머지.
-  // "모두 표시"는 지키되, 실제로 눌러볼 수 있는 품목이 위로 오게 해서 목록이 쓸모 있게 함.
+  // 즐겨찾기한 품목만 위로 올리고, 나머지는 원래 카탈로그 순서 그대로 둔다.
   const visibleItems = useMemo(() => {
     const trimmed = query.trim();
     const base = trimmed
@@ -31,10 +30,7 @@ export default function ItemBrowser() {
     return [...base].sort((a, b) => {
       const favA = isFavorite(a.key) ? 0 : 1;
       const favB = isFavorite(b.key) ? 0 : 1;
-      if (favA !== favB) return favA - favB;
-      const supA = a.slug ? 0 : 1;
-      const supB = b.slug ? 0 : 1;
-      return supA - supB;
+      return favA - favB;
     });
   }, [query, isFavorite]);
 
