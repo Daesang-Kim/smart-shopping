@@ -27,8 +27,12 @@
   - `src/lib/ocr.ts` — Google Cloud Vision TEXT_DETECTION 호출
   - `src/lib/kamisCatalog.ts` — KAMIS 품목코드표 전체(123개, 축산물 제외) 하드코딩. OCR 매칭은 MVP 5개가 아니라 **이 전체 카탈로그**를 대상으로 함
   - `src/lib/matchItem.ts` — OCR 텍스트와 품목명을 편집거리 기반으로 유사도 매칭, 후보 최대 3개 제시. MVP_ITEMS에 없는 품목은 `slug: null`로 표시(상세화면 미지원)
-  - `src/app/api/ocr/route.ts`, `src/components/OcrSearch.tsx` — 홈 화면에 "가격표 촬영으로 찾기" 버튼 추가 (모바일 카메라 바로 실행, 업로드 전 클라이언트에서 1024px로 리사이즈), 미지원 품목은 회색으로 비활성 표시
   - 실제 이미지로 종단간 테스트 완료: "양파(국산) 1,890원" → 양파 100%, 대파 50% 순으로 정확히 매칭
+- **홈 화면을 검색 우선 구조로 재설계**:
+  - `src/lib/catalog.ts` — KAMIS 전체 품목(123개, 이름 중복 제거)을 화면용으로 정규화
+  - `src/components/ItemBrowser.tsx` — 텍스트 검색이 기본, 카메라(OCR)는 검색창 옆 아이콘 버튼(사이드 옵션)으로 축소 (`OcrSearch.tsx`는 이 컴포넌트로 흡수되어 삭제)
+  - `src/lib/useFavorites.ts` — 즐겨찾기를 localStorage에 저장(계정 없이 기기별로 관리), `useSyncExternalStore`로 SSR 하이드레이션 불일치 없이 구현
+  - 목록 정렬 우선순위: 즐겨찾기 > 지원되는(상세화면 있는) 품목 > 나머지. 즐겨찾기는 품목 리스트에서 별 아이콘 클릭으로 바로 토글
 
 ## 3. 알아두어야 할 트레이드오프
 
