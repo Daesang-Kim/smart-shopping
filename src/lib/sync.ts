@@ -100,6 +100,34 @@ interface ItemRow {
   source_params: { ctgryCode: string; itemCode: string; seCode?: string };
 }
 
+// 한 번에 너무 많은 품목을 동시에 돌리면 KAMIS에 순간적으로 부담을 줄 수 있어
+// 동시 실행 개수를 제한한다. 순차 처리는 품목이 늘어날수록 cron 실행시간이 선형으로
+// 늘어나 함수 제한시간을 넘기기 쉬워서(실측: 8개로도 60초 초과) 병렬화가 필요했다.
+const SYNC_CONCURRENCY = 5;
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor++;
+      try {
+        results[index] = { status: "fulfilled", value: await fn(items[index]) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 // 매일 cron이 호출 — MVP 고정 목록이 아니라, 그동안 사용자가 조회해서
 // "이미 DB에 쌓인" 품목들만 갱신한다. 조회된 적 없는 품목은 손대지 않는다.
 // 소매/도매가 각각 별도 행으로 저장돼 있으므로, 저장된 seCode 그대로 갱신한다.
@@ -115,30 +143,33 @@ export async function syncAllActiveItems(): Promise<SyncAllResult> {
     throw new Error(`활성 품목 조회 실패: ${listError.message}`);
   }
 
+  const rows = (existingItems ?? []) as ItemRow[];
+  const settled = await mapWithConcurrency(rows, SYNC_CONCURRENCY, (row) =>
+    syncItem(
+      {
+        slug: row.slug,
+        name: row.name,
+        category: row.category,
+        ctgryCode: row.source_params.ctgryCode,
+        itemCode: row.source_params.itemCode,
+      },
+      row.source_params.seCode ?? "01",
+    ),
+  );
+
   const results: SyncItemResult[] = [];
   const errors: { slug: string; message: string }[] = [];
 
-  for (const row of (existingItems ?? []) as ItemRow[]) {
-    try {
-      results.push(
-        await syncItem(
-          {
-            slug: row.slug,
-            name: row.name,
-            category: row.category,
-            ctgryCode: row.source_params.ctgryCode,
-            itemCode: row.source_params.itemCode,
-          },
-          row.source_params.seCode ?? "01",
-        ),
-      );
-    } catch (err) {
+  settled.forEach((outcome, i) => {
+    if (outcome.status === "fulfilled") {
+      results.push(outcome.value);
+    } else {
       errors.push({
-        slug: row.slug,
-        message: err instanceof Error ? err.message : String(err),
+        slug: rows[i].slug,
+        message: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
       });
     }
-  }
+  });
 
   const status = errors.length === 0 ? "success" : results.length === 0 ? "failed" : "partial";
   await supabase.from("sync_runs").insert({
