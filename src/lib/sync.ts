@@ -17,10 +17,13 @@ export interface SyncItemResult {
 
 // 품목 하나에 대해: KAMIS에서 가져와 정규화 → items/daily_prices에 upsert.
 // item_id+price_date가 유니크라서, 같은 날짜를 다시 수집해도 덮어쓸 뿐 중복이 쌓이지 않는다.
-// 이 함수는 두 곳에서 호출된다: ①매일 cron이 "이미 수집된 품목"을 갱신할 때
-// ②사용자가 처음 조회하는 품목을 그 자리에서 즉시 캐싱할 때(lib/priceSummary.ts)
+// 이 함수는 세 곳에서 호출된다: ①매일 cron이 "이미 수집된 품목"을 갱신할 때
+// ②사용자가 처음 조회하는 품목을 그 자리에서 즉시 캐싱할 때 ③도매가 토글을 처음 켤 때
+// (lib/priceSummary.ts). seCode를 다르게 주면 같은 품목이라도 소매/도매를 별도 슬러그로
+// 캐싱한다 — entry.slug는 호출부에서 이미 가격유형별로 구분된 값을 넘겨준다.
 export async function syncItem(
   entry: Pick<BrowsableItem, "slug" | "name" | "category" | "ctgryCode" | "itemCode">,
+  seCode: string = "01",
 ): Promise<SyncItemResult> {
   const supabase = getSupabaseServerClient();
 
@@ -33,6 +36,7 @@ export async function syncItem(
     itemCode: entry.itemCode,
     startDate,
     endDate,
+    seCode,
   });
   const daily = normalizeToDailyPrices(rows);
   if (daily.length === 0) {
@@ -50,7 +54,7 @@ export async function syncItem(
         category: entry.category,
         unit_label: unitLabel,
         source: "kamis",
-        source_params: { ctgryCode: entry.ctgryCode, itemCode: entry.itemCode },
+        source_params: { ctgryCode: entry.ctgryCode, itemCode: entry.itemCode, seCode },
         is_active: true,
       },
       { onConflict: "slug" },
@@ -93,11 +97,12 @@ interface ItemRow {
   slug: string;
   name: string;
   category: BrowsableItem["category"];
-  source_params: { ctgryCode: string; itemCode: string };
+  source_params: { ctgryCode: string; itemCode: string; seCode?: string };
 }
 
 // 매일 cron이 호출 — MVP 고정 목록이 아니라, 그동안 사용자가 조회해서
 // "이미 DB에 쌓인" 품목들만 갱신한다. 조회된 적 없는 품목은 손대지 않는다.
+// 소매/도매가 각각 별도 행으로 저장돼 있으므로, 저장된 seCode 그대로 갱신한다.
 export async function syncAllActiveItems(): Promise<SyncAllResult> {
   const supabase = getSupabaseServerClient();
 
@@ -116,13 +121,16 @@ export async function syncAllActiveItems(): Promise<SyncAllResult> {
   for (const row of (existingItems ?? []) as ItemRow[]) {
     try {
       results.push(
-        await syncItem({
-          slug: row.slug,
-          name: row.name,
-          category: row.category,
-          ctgryCode: row.source_params.ctgryCode,
-          itemCode: row.source_params.itemCode,
-        }),
+        await syncItem(
+          {
+            slug: row.slug,
+            name: row.name,
+            category: row.category,
+            ctgryCode: row.source_params.ctgryCode,
+            itemCode: row.source_params.itemCode,
+          },
+          row.source_params.seCode ?? "01",
+        ),
       );
     } catch (err) {
       errors.push({

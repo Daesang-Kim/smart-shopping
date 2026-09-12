@@ -1,11 +1,78 @@
-import { addDays, parseYyyymmdd, weekdayLabel } from "./date";
+import { addDays, addYears, diffDays, parseYyyymmdd, weekdayLabel } from "./date";
 import type { DailyPrice } from "./normalize";
+import { getNearbyHolidays } from "./holidays";
 
 export function last90Days(daily: DailyPrice[]): DailyPrice[] {
   if (daily.length === 0) return [];
   const latest = parseYyyymmdd(daily[daily.length - 1].date);
   const cutoff = addDays(latest, -90);
   return daily.filter((d) => parseYyyymmdd(d.date) >= cutoff);
+}
+
+export interface ChartPoint {
+  offsetDays: number; // 기준일(오늘 또는 작년 오늘) 대비 며칠 떨어져 있는지
+  price: number;
+  date: string;
+}
+
+export interface ChartHolidayMarker {
+  name: string;
+  offsetDays: number;
+  date: string;
+}
+
+export interface ChartData {
+  thisYear: ChartPoint[]; // 최근 90일 실측치 (오늘까지, 미래는 그리지 않음)
+  lastYear: ChartPoint[]; // 작년 동기간 -90일 ~ +30일 (작년 데이터는 이미 다 있으므로 미래분까지 표시)
+  holidaysThisYear: ChartHolidayMarker[];
+  holidaysLastYear: ChartHolidayMarker[];
+}
+
+export const CHART_PAST_DAYS = 90;
+export const CHART_FUTURE_DAYS = 30;
+
+// 올해 라인과 작년 라인을 "기준일로부터 며칠"이라는 공통 x축(offsetDays)에 정렬해서
+// 같은 위치에서 두 해를 비교할 수 있게 한다. 명절은 매년 양력 날짜가 달라지므로
+// (예: 추석 2025-10-06, 2026-09-25) 하드코딩 없이 그때그때 계산해 각 라인 기준으로 위치를 잡는다.
+export function buildChartData(daily: DailyPrice[], todayDate: string): ChartData {
+  const today = parseYyyymmdd(todayDate);
+  const lastYearAnchor = addYears(today, -1);
+
+  const thisYear: ChartPoint[] = [];
+  const lastYear: ChartPoint[] = [];
+
+  for (const d of daily) {
+    const date = parseYyyymmdd(d.date);
+
+    const offsetFromToday = diffDays(date, today);
+    if (offsetFromToday >= -CHART_PAST_DAYS && offsetFromToday <= 0) {
+      thisYear.push({ offsetDays: offsetFromToday, price: d.price, date: d.date });
+    }
+
+    const offsetFromLastYear = diffDays(date, lastYearAnchor);
+    if (offsetFromLastYear >= -CHART_PAST_DAYS && offsetFromLastYear <= CHART_FUTURE_DAYS) {
+      lastYear.push({ offsetDays: offsetFromLastYear, price: d.price, date: d.date });
+    }
+  }
+
+  const holidaysThisYear: ChartHolidayMarker[] = [];
+  const holidaysLastYear: ChartHolidayMarker[] = [];
+
+  for (const h of getNearbyHolidays(today.getFullYear())) {
+    const hDate = parseYyyymmdd(h.date);
+
+    const offsetFromToday = diffDays(hDate, today);
+    if (offsetFromToday >= -CHART_PAST_DAYS && offsetFromToday <= 0) {
+      holidaysThisYear.push({ name: h.name, offsetDays: offsetFromToday, date: h.date });
+    }
+
+    const offsetFromLastYear = diffDays(hDate, lastYearAnchor);
+    if (offsetFromLastYear >= -CHART_PAST_DAYS && offsetFromLastYear <= CHART_FUTURE_DAYS) {
+      holidaysLastYear.push({ name: h.name, offsetDays: offsetFromLastYear, date: h.date });
+    }
+  }
+
+  return { thisYear, lastYear, holidaysThisYear, holidaysLastYear };
 }
 
 export interface PercentileBadge {

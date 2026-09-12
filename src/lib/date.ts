@@ -26,6 +26,11 @@ export function addYears(date: Date, years: number): Date {
   return copy;
 }
 
+// a - b 를 "일" 단위로 반환 (시분초 없는 로컬 자정 기준 Date끼리만 사용할 것)
+export function diffDays(a: Date, b: Date): number {
+  return Math.round((a.getTime() - b.getTime()) / 86_400_000);
+}
+
 const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"] as const;
 
 export function weekdayLabel(date: Date): string {
