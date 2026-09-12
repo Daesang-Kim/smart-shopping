@@ -24,25 +24,42 @@ function buildUrl(query: KamisQuery, pageNo: number): string {
   return `${ENDPOINT}?${params.toString()}`;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const MAX_RETRIES = 3;
+
+// data.go.kr는 짧은 시간에 요청이 몰리면 429(Too Many Requests)를 준다 — 여러 품목을
+// 동시에 동기화할 때 실제로 겪은 문제. 429만 골라서 잠깐 쉬었다가 재시도한다.
 async function fetchPage(query: KamisQuery, pageNo: number) {
-  const res = await fetch(buildUrl(query, pageNo));
-  if (!res.ok) {
-    throw new Error(`KAMIS API 요청 실패: ${res.status} ${res.statusText}`);
-  }
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetch(buildUrl(query, pageNo));
 
-  const data = (await res.json()) as KamisApiResponse;
-  const { header, body } = data.response;
-  if (header.resultCode !== "0") {
-    throw new Error(`KAMIS API 오류: ${header.resultCode} ${header.resultMsg}`);
-  }
+    if (res.status === 429 && attempt < MAX_RETRIES) {
+      await sleep(500 * 2 ** attempt);
+      continue;
+    }
+    if (!res.ok) {
+      throw new Error(`KAMIS API 요청 실패: ${res.status} ${res.statusText}`);
+    }
 
-  return body;
+    const data = (await res.json()) as KamisApiResponse;
+    const { header, body } = data.response;
+    if (header.resultCode !== "0") {
+      throw new Error(`KAMIS API 오류: ${header.resultCode} ${header.resultMsg}`);
+    }
+
+    return body;
+  }
+  throw new Error("KAMIS API 요청 실패: 429 Too Many Requests (재시도 초과)");
 }
 
 // KAMIS는 날짜당 여러 시장(mrkt_cd)의 조사값을 개별 row로 반환하므로,
 // 기간이 길면 totalCount가 numOfRows(최대 1000)를 넘어 페이지네이션이 필요하다.
-// (임시: DB 캐싱 전까지는 매 요청마다 라이브 호출하므로, 남은 페이지를 병렬로 가져와 지연을 줄인다.
-//  Supabase 연동 후에는 이 호출이 cron 배치로 옮겨가고 앱은 DB만 읽으므로 이 최적화 자체가 불필요해진다.)
+// 한 품목 안에서는 페이지를 병렬로 가져와 지연을 줄이고(보통 몇 페이지뿐이라 순간
+// 요청 제한에 잘 안 걸림), 429가 나면 재시도로 흡수한다. 여러 품목을 "동시에" 도는
+// 동시성 제한은 호출부(lib/sync.ts)에서 따로 관리한다.
 export async function fetchKamisDailyPrices(
   query: KamisQuery,
 ): Promise<KamisRawRow[]> {

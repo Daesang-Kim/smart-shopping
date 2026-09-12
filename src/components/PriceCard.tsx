@@ -12,9 +12,10 @@ function badgeColorClass(label: "비싼 편" | "저렴한 편" | "보통") {
 }
 
 const CHART_WIDTH = 320;
-const CHART_HEIGHT = 130;
 const LABEL_AREA = 16; // 상단 명절 라벨 공간
-const PLOT_HEIGHT = CHART_HEIGHT - LABEL_AREA;
+const BOTTOM_LABEL_AREA = 12; // 하단 "오늘" 라벨 공간
+const PLOT_HEIGHT = 114;
+const CHART_HEIGHT = LABEL_AREA + PLOT_HEIGHT + BOTTOM_LABEL_AREA;
 const X_MIN = -CHART_PAST_DAYS;
 const X_MAX = CHART_FUTURE_DAYS;
 
@@ -35,6 +36,11 @@ function buildPolyline(points: ChartPoint[], yMin: number, yMax: number): string
     .join(" ");
 }
 
+function mapY(price: number, yMin: number, yMax: number): number {
+  const ySpan = yMax - yMin || 1;
+  return LABEL_AREA + PLOT_HEIGHT - ((price - yMin) / ySpan) * PLOT_HEIGHT;
+}
+
 function HolidayMarker({ marker, color }: { marker: ChartHolidayMarker; color: string }) {
   const x = mapX(marker.offsetDays);
   const date = parseYyyymmdd(marker.date);
@@ -44,13 +50,44 @@ function HolidayMarker({ marker, color }: { marker: ChartHolidayMarker; color: s
         x1={x}
         y1={LABEL_AREA}
         x2={x}
-        y2={CHART_HEIGHT}
+        y2={LABEL_AREA + PLOT_HEIGHT}
         stroke={color}
         strokeWidth={1}
         strokeDasharray="2,2"
       />
       <text x={x} y={10} fontSize={8} fill={color} textAnchor="middle">
         {marker.name} {date.getMonth() + 1}/{date.getDate()}
+      </text>
+    </g>
+  );
+}
+
+// "오늘"이 그래프 어디쯤인지 표시 — 실선이 오늘(offsetDays=0)에서 끝나는데
+// 시각적 표시가 없으면 어디까지가 실측이고 오늘이 정확히 어딘지 알기 어려워서 추가.
+function TodayMarker({ y }: { y: number }) {
+  const x = mapX(0);
+  return (
+    <g>
+      <line
+        x1={x}
+        y1={LABEL_AREA}
+        x2={x}
+        y2={LABEL_AREA + PLOT_HEIGHT}
+        stroke="var(--ink)"
+        strokeWidth={1}
+        strokeDasharray="1,2"
+        opacity={0.4}
+      />
+      <circle cx={x} cy={y} r={3} fill="var(--ink)" />
+      <text
+        x={x}
+        y={LABEL_AREA + PLOT_HEIGHT + 10}
+        fontSize={8}
+        fill="var(--ink)"
+        fontWeight="bold"
+        textAnchor="middle"
+      >
+        오늘
       </text>
     </g>
   );
@@ -73,6 +110,12 @@ export default function PriceCard({
   const [error, setError] = useState<string | null>(null);
 
   const summary = summaries[priceType];
+
+  const chartPrices = summary
+    ? [...summary.chart.thisYear, ...summary.chart.lastYear].map((p) => p.price)
+    : [];
+  const chartYMin = chartPrices.length ? Math.min(...chartPrices) : 0;
+  const chartYMax = chartPrices.length ? Math.max(...chartPrices) : 1;
 
   async function handleToggle(next: PriceType) {
     setPriceType(next);
@@ -181,38 +224,19 @@ export default function PriceCard({
                 <HolidayMarker key={`ty-${h.name}`} marker={h} color="var(--expensive)" />
               ))}
               <polyline
-                points={buildPolyline(
-                  summary.chart.lastYear,
-                  Math.min(
-                    ...summary.chart.thisYear.map((p) => p.price),
-                    ...summary.chart.lastYear.map((p) => p.price),
-                  ),
-                  Math.max(
-                    ...summary.chart.thisYear.map((p) => p.price),
-                    ...summary.chart.lastYear.map((p) => p.price),
-                  ),
-                )}
+                points={buildPolyline(summary.chart.lastYear, chartYMin, chartYMax)}
                 fill="none"
                 stroke="var(--ink-dim)"
                 strokeWidth={1.5}
                 strokeDasharray="4,3"
               />
               <polyline
-                points={buildPolyline(
-                  summary.chart.thisYear,
-                  Math.min(
-                    ...summary.chart.thisYear.map((p) => p.price),
-                    ...summary.chart.lastYear.map((p) => p.price),
-                  ),
-                  Math.max(
-                    ...summary.chart.thisYear.map((p) => p.price),
-                    ...summary.chart.lastYear.map((p) => p.price),
-                  ),
-                )}
+                points={buildPolyline(summary.chart.thisYear, chartYMin, chartYMax)}
                 fill="none"
                 stroke="var(--ink)"
                 strokeWidth={2}
               />
+              <TodayMarker y={mapY(summary.today.price, chartYMin, chartYMax)} />
             </svg>
             <div className="flex items-center gap-3 text-[10px] text-ink-dim mt-1">
               <span>― 올해(실측)</span>

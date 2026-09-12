@@ -100,10 +100,11 @@ interface ItemRow {
   source_params: { ctgryCode: string; itemCode: string; seCode?: string };
 }
 
-// 한 번에 너무 많은 품목을 동시에 돌리면 KAMIS에 순간적으로 부담을 줄 수 있어
-// 동시 실행 개수를 제한한다. 순차 처리는 품목이 늘어날수록 cron 실행시간이 선형으로
-// 늘어나 함수 제한시간을 넘기기 쉬워서(실측: 8개로도 60초 초과) 병렬화가 필요했다.
-const SYNC_CONCURRENCY = 5;
+// 순차 처리는 품목이 늘어날수록 cron 실행시간이 선형으로 늘어나 함수 제한시간을
+// 넘기기 쉽다(실측: 8개로도 60초 초과). 그렇다고 너무 높이면 품목마다 내부적으로도
+// 페이지를 병렬 요청하기 때문에(kamis/client.ts) 합쳐서 data.go.kr의 순간 요청 제한
+// (429)에 걸린다(실측: 동시 5개에서 대부분 429). 2로 절충.
+const SYNC_CONCURRENCY = 2;
 
 async function mapWithConcurrency<T, R>(
   items: T[],
