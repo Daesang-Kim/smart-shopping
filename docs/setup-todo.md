@@ -53,7 +53,15 @@
 - Google Cloud Vision 키는 **smart-shopping-82693이라는 별도 GCP 프로젝트**에 결제가 연결되어 있음 — 다른 프로젝트(MenoWebApp 등)와 무관
 - **Vercel Hobby 플랜은 cron이 하루 1회로 제한됨** (실측: 하루 여러 번 도는 스케줄은 배포 자체가 거부됨) — 그래서 cron이 하루에 4개씩만 순환 갱신하고, 현재 활성 품목(~8개) 기준 전체가 한 바퀴 도는 데 이틀 정도 걸림. 품목이 늘면 그만큼 개별 품목 갱신 주기도 길어지므로, 필요시 배치 크기를 늘리거나 Pro 플랜(더 잦은 cron) 전환 검토
 
-## 5. 추천하는 다음 순서
+## 5. PWA 설치 지원 추가
+
+- 아이콘: "가격표 태그 + 체크마크"(가격이 괜찮은지 확인해준다는 컨셉) 디자인, `scripts/icon-source.svg`(일반용)·`scripts/icon-maskable-source.svg`(Android 마스커블용, 세이프존 고려)가 원본. `npm i -D sharp` 후 이 SVG를 재편집하고 다시 PNG로 뽑으면 아이콘 교체 가능
+- `src/app/manifest.ts` — Next.js App Router의 manifest 특수 파일로 `/manifest.webmanifest` 자동 생성 (이름/아이콘/standalone 모드 등)
+- `src/app/icon.png`, `src/app/apple-icon.png` — Next.js가 자동으로 `<link rel="icon">`, `<link rel="apple-touch-icon">` 태그 생성
+- `public/sw.js` + `src/components/ServiceWorkerRegister.tsx` — Chrome의 PWA 설치 조건(등록된 서비스워커) 충족용 최소 구현. 가격 데이터가 자주 바뀌므로 오프라인 캐싱은 하지 않음
+- 로컬에서 매니페스트/아이콘/서비스워커 등록까지 확인 완료. 실기기(안드로이드 Chrome "홈 화면에 추가", iOS Safari "홈 화면에 추가")에서의 설치 동작은 배포 후 직접 확인 필요
+
+## 6. 추천하는 다음 순서
 
 1. 축평원(축산물) 연동 검토
 2. OCR/검색 매칭 정확도 개선 (품목이 더 늘어날 경우 자모 단위 매칭 등)
