@@ -28,16 +28,20 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 4;
 
 // data.go.kr는 짧은 시간에 요청이 몰리면 429(Too Many Requests)를 준다 — 여러 품목을
 // 동시에 동기화할 때 실제로 겪은 문제. 429만 골라서 잠깐 쉬었다가 재시도한다.
+// 지연에 무작위성(jitter)을 섞는 이유: 동시에 시작된 여러 요청이 똑같은 backoff
+// 스케줄을 타면 재시도마저 서로 같은 타이밍에 몰려 또 429를 유발하는 걸 실제로 봤다.
 async function fetchPage(query: KamisQuery, pageNo: number) {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const res = await fetch(buildUrl(query, pageNo));
 
     if (res.status === 429 && attempt < MAX_RETRIES) {
-      await sleep(500 * 2 ** attempt);
+      const backoff = 700 * 2 ** attempt;
+      const jitter = Math.random() * backoff * 0.5;
+      await sleep(backoff + jitter);
       continue;
     }
     if (!res.ok) {
