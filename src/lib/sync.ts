@@ -56,6 +56,7 @@ export async function syncItem(
         source: "kamis",
         source_params: { ctgryCode: entry.ctgryCode, itemCode: entry.itemCode, seCode },
         is_active: true,
+        last_synced_at: new Date().toISOString(),
       },
       { onConflict: "slug" },
     )
@@ -100,10 +101,15 @@ interface ItemRow {
   source_params: { ctgryCode: string; itemCode: string; seCode?: string };
 }
 
-// 순차 처리는 품목이 늘어날수록 cron 실행시간이 선형으로 늘어나 함수 제한시간을
-// 넘기기 쉽다(실측: 8개로도 60초 초과). 그렇다고 너무 높이면 품목마다 내부적으로도
-// 페이지를 병렬 요청하기 때문에(kamis/client.ts) 합쳐서 data.go.kr의 순간 요청 제한
-// (429)에 걸린다(실측: 동시 5개에서 대부분 429). 2로 절충.
+// 활성 품목이 늘어날수록 "한 번에 전부" 갱신하면 함수 제한시간을 넘기기 쉽다
+// (실측: 8개로도 60초 초과). 그래서 매 실행마다 일부(BATCH_SIZE)만, 가장 오래
+// 갱신 안 된 것부터 처리하고, cron을 자주 돌려(vercel.json) 전체가 순환하며
+// 갱신되게 한다 — 품목 수가 늘어나도 실행시간은 항상 배치 크기만큼으로 유지됨.
+const BATCH_SIZE = 4;
+
+// 동시성을 너무 높이면 품목마다 내부적으로도 페이지를 병렬 요청하기 때문에
+// (kamis/client.ts) 합쳐서 data.go.kr의 순간 요청 제한(429)에 걸린다
+// (실측: 동시 5개에서 대부분 429). 2로 절충.
 const SYNC_CONCURRENCY = 2;
 
 async function mapWithConcurrency<T, R>(
@@ -129,16 +135,20 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-// 매일 cron이 호출 — MVP 고정 목록이 아니라, 그동안 사용자가 조회해서
+// cron이 주기적으로 호출 — MVP 고정 목록이 아니라, 그동안 사용자가 조회해서
 // "이미 DB에 쌓인" 품목들만 갱신한다. 조회된 적 없는 품목은 손대지 않는다.
 // 소매/도매가 각각 별도 행으로 저장돼 있으므로, 저장된 seCode 그대로 갱신한다.
+// 한 번에 BATCH_SIZE개만, last_synced_at이 가장 오래된 것부터 처리해서 전체가
+// 여러 번의 실행에 걸쳐 순환 갱신되게 한다.
 export async function syncAllActiveItems(): Promise<SyncAllResult> {
   const supabase = getSupabaseServerClient();
 
   const { data: existingItems, error: listError } = await supabase
     .from("items")
     .select("slug, name, category, source_params")
-    .eq("is_active", true);
+    .eq("is_active", true)
+    .order("last_synced_at", { ascending: true, nullsFirst: true })
+    .limit(BATCH_SIZE);
 
   if (listError) {
     throw new Error(`활성 품목 조회 실패: ${listError.message}`);

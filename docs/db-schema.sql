@@ -11,7 +11,7 @@ create type price_source as enum ('kamis', 'ekape');
 -- 품목 마스터
 create table items (
   id            uuid primary key default gen_random_uuid(),
-  slug          text unique,                    -- 앱 코드(src/lib/items.ts)가 쓰는 안정 식별자, 예: "napa-cabbage"
+  slug          text unique,                    -- 앱 코드(src/lib/catalog.ts)가 쓰는 안정 식별자, 예: "200-211" (ctgryCode-itemCode)
   name          text not null,                  -- 표시명, 예: "삼겹살(냉장)"
   category      item_category not null,
   unit_label    text not null,                  -- 표시용, 예: "100g 기준"
@@ -21,7 +21,8 @@ create table items (
   -- 예) KAMIS: {"itemcategorycode":"200","itemcode":"231","kindcode":"01","productrankcode":"04"}
   source_params jsonb not null,
   is_active     boolean not null default true,  -- cron 수집 대상 여부 (품목 추가/중단 시 토글)
-  created_at    timestamptz not null default now()
+  created_at    timestamptz not null default now(),
+  last_synced_at timestamptz                    -- cron이 배치로 순환 갱신할 때 "가장 오래된 것부터" 고르는 기준
 );
 
 -- 일별 소매가격 (정규화됨 — 소스 무관하게 동일한 형태)
