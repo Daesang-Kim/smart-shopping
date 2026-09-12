@@ -25,8 +25,9 @@
 - Vercel 배포 완료, GitHub push 시 자동배포, 환경변수(KAMIS/Supabase/CRON_SECRET/Vision) 3개 환경 모두 등록
 - **OCR 검색 구현 완료**:
   - `src/lib/ocr.ts` — Google Cloud Vision TEXT_DETECTION 호출
-  - `src/lib/matchItem.ts` — OCR 텍스트와 품목명을 편집거리 기반으로 유사도 매칭, 후보 최대 3개 제시
-  - `src/app/api/ocr/route.ts`, `src/components/OcrSearch.tsx` — 홈 화면에 "가격표 촬영으로 찾기" 버튼 추가 (모바일 카메라 바로 실행, 업로드 전 클라이언트에서 1024px로 리사이즈)
+  - `src/lib/kamisCatalog.ts` — KAMIS 품목코드표 전체(123개, 축산물 제외) 하드코딩. OCR 매칭은 MVP 5개가 아니라 **이 전체 카탈로그**를 대상으로 함
+  - `src/lib/matchItem.ts` — OCR 텍스트와 품목명을 편집거리 기반으로 유사도 매칭, 후보 최대 3개 제시. MVP_ITEMS에 없는 품목은 `slug: null`로 표시(상세화면 미지원)
+  - `src/app/api/ocr/route.ts`, `src/components/OcrSearch.tsx` — 홈 화면에 "가격표 촬영으로 찾기" 버튼 추가 (모바일 카메라 바로 실행, 업로드 전 클라이언트에서 1024px로 리사이즈), 미지원 품목은 회색으로 비활성 표시
   - 실제 이미지로 종단간 테스트 완료: "양파(국산) 1,890원" → 양파 100%, 대파 50% 순으로 정확히 매칭
 
 ## 3. 알아두어야 할 트레이드오프

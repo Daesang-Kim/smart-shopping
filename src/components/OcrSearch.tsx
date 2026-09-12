@@ -4,10 +4,10 @@ import { useState } from "react";
 import Link from "next/link";
 
 interface Candidate {
-  id: string;
   name: string;
   category: string;
   score: number;
+  slug: string | null;
 }
 
 const MAX_DIMENSION = 1024; // Vision API엔 이 정도 해상도로 충분하고, 업로드 용량도 줄어듦
@@ -94,16 +94,26 @@ export default function OcrSearch() {
               일치하는 품목을 찾지 못했어요. 아래 목록에서 직접 골라주세요.
             </p>
           ) : (
-            candidates.map((c) => (
-              <Link
-                key={c.id}
-                href={`/item/${c.id}`}
-                className="bg-cheap-soft rounded-xl px-4 py-2.5 flex items-center justify-between"
-              >
-                <span className="font-bold text-ink">{c.name}</span>
-                <span className="text-xs text-ink-dim">일치도 {c.score}%</span>
-              </Link>
-            ))
+            candidates.map((c) =>
+              c.slug ? (
+                <Link
+                  key={c.name}
+                  href={`/item/${c.slug}`}
+                  className="bg-cheap-soft rounded-xl px-4 py-2.5 flex items-center justify-between"
+                >
+                  <span className="font-bold text-ink">{c.name}</span>
+                  <span className="text-xs text-ink-dim">일치도 {c.score}%</span>
+                </Link>
+              ) : (
+                <div
+                  key={c.name}
+                  className="bg-surface/60 rounded-xl px-4 py-2.5 flex items-center justify-between opacity-70"
+                >
+                  <span className="font-bold text-ink-dim">{c.name}</span>
+                  <span className="text-[11px] text-ink-dim">일치도 {c.score}% · 아직 미지원 품목</span>
+                </div>
+              ),
+            )
           )}
         </div>
       )}

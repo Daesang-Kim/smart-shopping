@@ -12,12 +12,7 @@ export async function POST(req: Request) {
 
   try {
     const text = await extractTextFromImage(base64Image);
-    const candidates = matchItemsFromText(text).map(({ item, score }) => ({
-      id: item.id,
-      name: item.name,
-      category: item.category,
-      score,
-    }));
+    const candidates = matchItemsFromText(text);
 
     return NextResponse.json({ text, candidates });
   } catch (err) {
