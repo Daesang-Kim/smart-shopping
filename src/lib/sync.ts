@@ -28,7 +28,7 @@ async function fetchDaily(
 
   // ekape는 이미 전국 평균가를 하루 단위로 주므로 KAMIS처럼 여러 시장을 평균 낼 필요가 없다.
   const rows = await fetchEkapeDailyPrices(
-    { judgeKind: entry.judgeKind, itemCd: entry.itemCd },
+    { judgeKind: entry.judgeKind, itemCd: entry.itemCd, grade: entry.grade },
     startDate,
     endDate,
   );
@@ -72,7 +72,7 @@ export async function syncItem(
   const sourceParams =
     entry.source === "kamis"
       ? { ctgryCode: entry.ctgryCode, itemCode: entry.itemCode, seCode }
-      : { judgeKind: entry.judgeKind, itemCd: entry.itemCd };
+      : { judgeKind: entry.judgeKind, itemCd: entry.itemCd, grade: entry.grade };
 
   const { data: itemRow, error: itemError } = await supabase
     .from("items")
@@ -134,6 +134,7 @@ interface ItemRow {
     judgeKind?: string;
     itemCd?: string;
     seCode?: string;
+    grade?: string;
   };
 }
 
@@ -155,6 +156,7 @@ function toBrowsableItem(row: ItemRow): BrowsableItem {
     source: "ekape",
     judgeKind: row.source_params.judgeKind!,
     itemCd: row.source_params.itemCd!,
+    grade: row.source_params.grade,
   };
 }
 

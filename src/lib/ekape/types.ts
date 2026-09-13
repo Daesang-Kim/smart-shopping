@@ -26,4 +26,7 @@ export interface EkapeResponse {
 export interface EkapeQuery {
   judgeKind: string;
   itemCd: string;
+  // 지정하면 grdNm이 이 값과 일치하는 row만 사용한다 (소=등급별, 수입갈비냉동=원산지별로
+  // 여러 row가 섞여서 오기 때문). 생략하면 응답에 값이 하나뿐인 품목이라는 뜻.
+  grade?: string;
 }

@@ -17,6 +17,7 @@ export interface EkapeBrowsableItem {
   source: "ekape";
   judgeKind: string;
   itemCd: string;
+  grade?: string; // 지정 시 grdNm이 이 값과 일치하는 데이터만 사용 (등급/원산지 구분)
 }
 
 export type BrowsableItem = KamisBrowsableItem | EkapeBrowsableItem;
@@ -44,13 +45,18 @@ for (const entry of EKAPE_CATALOG) {
   if (seenNames.has(entry.name)) continue;
   seenNames.add(entry.name);
 
+  const slug = entry.gradeSlug
+    ? `ekape-${entry.judgeKind}-${entry.itemCd}-${entry.gradeSlug}`
+    : `ekape-${entry.judgeKind}-${entry.itemCd}`;
+
   BROWSABLE_ITEMS.push({
-    slug: `ekape-${entry.judgeKind}-${entry.itemCd}`,
+    slug,
     name: entry.name,
     category: "축산물",
     source: "ekape",
     judgeKind: entry.judgeKind,
     itemCd: entry.itemCd,
+    grade: entry.grade,
   });
 }
 

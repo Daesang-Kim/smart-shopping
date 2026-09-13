@@ -52,8 +52,11 @@ async function fetchOneDay(query: EkapeQuery, dateYmd: string): Promise<EkapeDai
       }
 
       const items: EkapeItem[] = data.response.body?.items?.item ?? [];
-      // 응답엔 해당 날짜 실측치와 "평년"(과거 평균) 두 건이 섞여 오므로 실측치만 고른다.
-      const todayItem = items.find((it) => it.standYmd === dateYmd);
+      // 응답엔 해당 날짜 실측치와 "평년"(과거 평균)이 섞여 오고, 소/수입갈비처럼
+      // 등급·원산지별로 여러 row가 같이 오는 품목도 있어 날짜+구분값을 모두 맞춰야 한다.
+      const todayItem = items.find(
+        (it) => it.standYmd === dateYmd && (query.grade === undefined || it.grdNm === query.grade),
+      );
       if (!todayItem) return null; // 조사 안 된 날 — 정상
 
       const price = Number(todayItem.ntslPrc);
