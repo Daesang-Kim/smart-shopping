@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { PriceSummary, PriceType } from "@/lib/priceSummary";
 import { CHART_FUTURE_DAYS, CHART_PAST_DAYS, type ChartHolidayMarker, type ChartPoint } from "@/lib/stats";
 import { parseYyyymmdd, formatKoreanDate } from "@/lib/date";
+import { useFavorites } from "@/lib/useFavorites";
 
 function badgeColorClass(label: "비싼 편" | "저렴한 편" | "보통") {
   if (label === "비싼 편") return "bg-expensive-soft text-expensive";
@@ -108,6 +109,7 @@ export default function PriceCard({
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { isFavorite, toggle: toggleFavorite } = useFavorites();
 
   const summary = summaries[priceType];
 
@@ -141,7 +143,16 @@ export default function PriceCard({
   return (
     <div className="bg-surface rounded-2xl px-6 py-6 shadow-2xl">
       <div className="flex items-baseline justify-between mb-1">
-        <h1 className="text-lg font-bold">{itemName}</h1>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => toggleFavorite(itemId)}
+            className="text-lg leading-none"
+            aria-label="즐겨찾기"
+          >
+            {isFavorite(itemId) ? "⭐" : "☆"}
+          </button>
+          <h1 className="text-lg font-bold">{itemName}</h1>
+        </div>
         {supportsWholesale && (
           <div className="flex rounded-full bg-ink/10 p-0.5 text-[11px]">
             {(["retail", "wholesale"] as const).map((type) => (
@@ -254,32 +265,44 @@ export default function PriceCard({
           <div className="mb-6">
             <h2 className="text-sm font-bold mb-2">요일별 평균가 (최근 3개월)</h2>
             <div className="grid grid-cols-7 gap-1 items-end h-24">
-              {(["월", "화", "수", "목", "금", "토", "일"] as const).map((day) => {
-                const isWeekend = day === "토" || day === "일";
-                const weekendInfo = isWeekend ? summary.weekday.weekend[day as "토" | "일"] : null;
-                const isEstimated = weekendInfo?.estimated ?? false;
-                const value = weekendInfo
-                  ? weekendInfo.value
-                  : summary.weekday.actual[day as "월" | "화" | "수" | "목" | "금"];
+              {(() => {
                 const allValues = [
                   ...Object.values(summary.weekday.actual),
                   summary.weekday.weekend.토.value,
                   summary.weekday.weekend.일.value,
                 ];
                 const max = Math.max(...allValues);
-                const isCheapest = summary.weekday.cheapestDay === day;
-                return (
-                  <div key={day} className="flex flex-col items-center justify-end h-full">
-                    <div
-                      className={`w-full rounded-t ${
-                        isCheapest ? "bg-cheap" : "bg-ink/20"
-                      } ${isEstimated ? "opacity-50 [background-image:repeating-linear-gradient(45deg,transparent,transparent_3px,rgba(0,0,0,0.2)_3px,rgba(0,0,0,0.2)_4px)]" : ""}`}
-                      style={{ height: `${(value / max) * 100}%` }}
-                    />
-                    <span className="text-[10px] mt-1 text-ink-dim">{day}</span>
-                  </div>
-                );
-              })}
+                const min = Math.min(...allValues);
+                const range = max - min || 1;
+                // 요일별 가격 차이가 원래 작은 품목(우유, 축산물 등)은 0부터 시작하는
+                // 막대 그래프로 그리면 다 거의 꽉 찬 높이로 보여서 차이가 안 보인다
+                // ("표시가 안 되는 버그"로 오인하기 쉬움) — 최저가를 바닥(20%)에,
+                // 최고가를 꼭대기(100%)에 두고 그 사이를 늘려서 상대적 차이를 부각한다.
+                const MIN_HEIGHT_PCT = 20;
+                const heightPct = (value: number) =>
+                  MIN_HEIGHT_PCT + ((value - min) / range) * (100 - MIN_HEIGHT_PCT);
+
+                return (["월", "화", "수", "목", "금", "토", "일"] as const).map((day) => {
+                  const isWeekend = day === "토" || day === "일";
+                  const weekendInfo = isWeekend ? summary.weekday.weekend[day as "토" | "일"] : null;
+                  const isEstimated = weekendInfo?.estimated ?? false;
+                  const value = weekendInfo
+                    ? weekendInfo.value
+                    : summary.weekday.actual[day as "월" | "화" | "수" | "목" | "금"];
+                  const isCheapest = summary.weekday.cheapestDay === day;
+                  return (
+                    <div key={day} className="flex flex-col items-center justify-end h-full">
+                      <div
+                        className={`w-full rounded-t ${
+                          isCheapest ? "bg-cheap" : "bg-ink/20"
+                        } ${isEstimated ? "opacity-50 [background-image:repeating-linear-gradient(45deg,transparent,transparent_3px,rgba(0,0,0,0.2)_3px,rgba(0,0,0,0.2)_4px)]" : ""}`}
+                        style={{ height: `${heightPct(value)}%` }}
+                      />
+                      <span className="text-[10px] mt-1 text-ink-dim">{day}</span>
+                    </div>
+                  );
+                });
+              })()}
             </div>
             {(summary.weekday.weekend.토.estimated || summary.weekday.weekend.일.estimated) && (
               <p className="text-[11px] text-ink-dim mt-2">
