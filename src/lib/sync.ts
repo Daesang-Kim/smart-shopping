@@ -9,6 +9,48 @@ function yyyymmddToIso(value: string): string {
   return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
 }
 
+function parseIsoDate(value: string): Date {
+  const [y, m, d] = value.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+interface ExistingItemState {
+  unitLabel: string;
+  lastStoredDate: string | null;
+}
+
+// 이미 저장된 품목인지, 있다면 가장 최근 날짜와 기존 unit_label을 찾는다 — 있으면
+// 그 다음날부터만 요청하면 돼서, 특히 하루 1건씩만 되는 축평원(ekape) 쪽 요청 수를
+// 크게 아낀다. 품목이 처음 보는 slug면(신규) null을 반환해서 호출부가 전체
+// backfillDays를 받게 한다. unit_label을 같이 돌려주는 이유: 이번에 새로 받은 날짜가
+// 없어도(daily.length===0) upsert 시 NOT NULL 컬럼에 값을 채워야 하기 때문
+// (Postgres는 ON CONFLICT DO UPDATE라도 컬럼이 아예 빠지면 충돌 감지 전에 NOT NULL
+// 위반으로 실패한다 — 기존 값을 그대로 다시 넣어줘야 함).
+async function getExistingItemState(
+  supabase: ReturnType<typeof getSupabaseServerClient>,
+  slug: string,
+): Promise<ExistingItemState | null> {
+  const { data: itemRow } = await supabase
+    .from("items")
+    .select("id, unit_label")
+    .eq("slug", slug)
+    .maybeSingle();
+  if (!itemRow) return null;
+
+  const { data: priceRow } = await supabase
+    .from("daily_prices")
+    .select("price_date")
+    .eq("item_id", itemRow.id)
+    .order("price_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return {
+    unitLabel: itemRow.unit_label as string,
+    lastStoredDate: (priceRow?.price_date as string | undefined) ?? null,
+  };
+}
+
 async function fetchDaily(
   entry: BrowsableItem,
   startDate: string,
@@ -60,15 +102,28 @@ export async function syncItem(
   // (60초)에 너무 가까웠음. 그래서 ekape는 100일만 백필한다(작년 비교/작년 점선
   // 라인은 데이터 부족으로 자연히 생략됨 — 계절성 품목과 같은 트레이드오프).
   const backfillDays = entry.source === "ekape" ? 100 : 400;
-  const startDate = toYyyymmdd(addDays(today, -backfillDays));
   const endDate = toYyyymmdd(today);
 
-  const daily = await fetchDaily(entry, startDate, endDate, seCode);
-  if (daily.length === 0) {
+  // 이미 저장된 마지막 날짜가 있으면 그 다음날부터만 요청한다 — 특히 축평원은
+  // 하루 1건씩 호출해야 해서(오퍼레이션당 일일 1,000건 한도), 매번 backfillDays
+  // 전체를 다시 받으면 품목 수가 늘수록 금방 한도를 소진한다. 신규 품목(저장된
+  // 날짜 없음)만 전체 backfillDays를 받는다.
+  const existing = await getExistingItemState(supabase, entry.slug);
+  const startDate = existing?.lastStoredDate
+    ? toYyyymmdd(addDays(parseIsoDate(existing.lastStoredDate), 1))
+    : toYyyymmdd(addDays(today, -backfillDays));
+
+  // 어제까지 이미 오늘자 데이터를 받아둔 경우 등 — 새로 받을 날짜가 없으면
+  // API를 호출하지 않고 last_synced_at만 갱신한다 (배치 순환 순서 갱신용).
+  const daily = startDate <= endDate ? await fetchDaily(entry, startDate, endDate, seCode) : [];
+  if (daily.length === 0 && !existing) {
     throw new Error(`${entry.name}: 데이터가 없습니다.`);
   }
 
-  const unitLabel = daily[daily.length - 1].unit;
+  // 새로 받은 데이터가 없으면 기존 unit_label을 그대로 다시 채운다 — 값을 비우면
+  // Postgres가 ON CONFLICT DO UPDATE라도 INSERT 후보 행을 먼저 구성하는 과정에서
+  // NOT NULL 위반으로 실패한다(충돌 감지보다 먼저 체크됨. 실측으로 확인).
+  const unitLabel = daily.length > 0 ? daily[daily.length - 1].unit : existing!.unitLabel;
   const sourceParams =
     entry.source === "kamis"
       ? { ctgryCode: entry.ctgryCode, itemCode: entry.itemCode, seCode }
@@ -102,12 +157,16 @@ export async function syncItem(
     retail_price: d.price,
   }));
 
-  const { error: priceError } = await supabase
-    .from("daily_prices")
-    .upsert(priceRows, { onConflict: "item_id,price_date" });
+  // 새로 받을 날짜가 없으면(이미 오늘자까지 저장돼 있음) daily_prices는 건드릴 게
+  // 없다 — 빈 배열 upsert는 불필요한 요청이라 건너뛴다.
+  if (priceRows.length > 0) {
+    const { error: priceError } = await supabase
+      .from("daily_prices")
+      .upsert(priceRows, { onConflict: "item_id,price_date" });
 
-  if (priceError) {
-    throw new Error(`${entry.name}: daily_prices upsert 실패 - ${priceError.message}`);
+    if (priceError) {
+      throw new Error(`${entry.name}: daily_prices upsert 실패 - ${priceError.message}`);
+    }
   }
 
   return {
