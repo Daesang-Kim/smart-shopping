@@ -114,14 +114,20 @@ export function priceRange(windowPrices: DailyPrice[]): PriceRange {
   return { min: min.price, max: max.price, minDate: min.date, maxDate: max.date };
 }
 
+export interface WeekendAverage {
+  value: number;
+  estimated: boolean; // false면 실측값(축평원 등 주말도 조사하는 소스), true면 추정값
+}
+
 export interface WeekdayAverages {
   actual: Record<"월" | "화" | "수" | "목" | "금", number>;
-  estimated: Record<"토" | "일", number>;
+  weekend: Record<"토" | "일", WeekendAverage>;
   cheapestDay: string;
 }
 
-// 최근 3개월 기준 요일별 평균가. KAMIS는 토·일 조사를 하지 않으므로,
-// 스펙 정의대로 토=금+(월-금)/3, 일=금+(월-금)*2/3 으로 추정한다.
+// 최근 3개월 기준 요일별 평균가. KAMIS는 토·일 조사를 하지 않아 추정이 필요하지만
+// (스펙 정의대로 토=금+(월-금)/3, 일=금+(월-금)*2/3), 축평원처럼 주말도 실제로
+// 조사하는 소스는 실측 평균을 그대로 쓴다 — 데이터가 있는데 억지로 추정할 이유가 없다.
 export function weekdayAverages(daily: DailyPrice[]): WeekdayAverages {
   if (daily.length === 0) {
     throw new Error("데이터가 없어 요일별 평균을 계산할 수 없습니다.");
@@ -136,6 +142,8 @@ export function weekdayAverages(daily: DailyPrice[]): WeekdayAverages {
     수: { sum: 0, count: 0 },
     목: { sum: 0, count: 0 },
     금: { sum: 0, count: 0 },
+    토: { sum: 0, count: 0 },
+    일: { sum: 0, count: 0 },
   };
 
   for (const d of recent) {
@@ -156,15 +164,21 @@ export function weekdayAverages(daily: DailyPrice[]): WeekdayAverages {
 
   const mon = actual["월"];
   const fri = actual["금"];
-  const estimated = {
-    토: Math.round(fri + (mon - fri) / 3),
-    일: Math.round(fri + ((mon - fri) * 2) / 3),
+  const weekend: Record<"토" | "일", WeekendAverage> = {
+    토:
+      sums["토"].count > 0
+        ? { value: Math.round(sums["토"].sum / sums["토"].count), estimated: false }
+        : { value: Math.round(fri + (mon - fri) / 3), estimated: true },
+    일:
+      sums["일"].count > 0
+        ? { value: Math.round(sums["일"].sum / sums["일"].count), estimated: false }
+        : { value: Math.round(fri + ((mon - fri) * 2) / 3), estimated: true },
   };
 
-  const allDays = { ...actual, ...estimated };
+  const allDays = { ...actual, 토: weekend.토.value, 일: weekend.일.value };
   const cheapestDay = Object.entries(allDays).sort((a, b) => a[1] - b[1])[0][0];
 
-  return { actual, estimated, cheapestDay };
+  return { actual, weekend, cheapestDay };
 }
 
 export interface YoyComparison {

@@ -1,11 +1,38 @@
 import { getSupabaseServerClient } from "./supabase";
 import type { BrowsableItem } from "./catalog";
 import { fetchKamisDailyPrices } from "./kamis/client";
-import { normalizeToDailyPrices } from "./normalize";
+import { fetchEkapeDailyPrices } from "./ekape/client";
+import { normalizeToDailyPrices, type DailyPrice } from "./normalize";
 import { addDays, toYyyymmdd } from "./date";
 
 function yyyymmddToIso(value: string): string {
   return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
+}
+
+async function fetchDaily(
+  entry: BrowsableItem,
+  startDate: string,
+  endDate: string,
+  seCode: string,
+): Promise<DailyPrice[]> {
+  if (entry.source === "kamis") {
+    const rows = await fetchKamisDailyPrices({
+      ctgryCode: entry.ctgryCode,
+      itemCode: entry.itemCode,
+      startDate,
+      endDate,
+      seCode,
+    });
+    return normalizeToDailyPrices(rows);
+  }
+
+  // ekape는 이미 전국 평균가를 하루 단위로 주므로 KAMIS처럼 여러 시장을 평균 낼 필요가 없다.
+  const rows = await fetchEkapeDailyPrices(
+    { judgeKind: entry.judgeKind, itemCd: entry.itemCd },
+    startDate,
+    endDate,
+  );
+  return rows;
 }
 
 export interface SyncItemResult {
@@ -15,14 +42,14 @@ export interface SyncItemResult {
   rowsWritten: number;
 }
 
-// 품목 하나에 대해: KAMIS에서 가져와 정규화 → items/daily_prices에 upsert.
+// 품목 하나에 대해: 소스(KAMIS/축평원)에서 가져와 정규화 → items/daily_prices에 upsert.
 // item_id+price_date가 유니크라서, 같은 날짜를 다시 수집해도 덮어쓸 뿐 중복이 쌓이지 않는다.
 // 이 함수는 세 곳에서 호출된다: ①매일 cron이 "이미 수집된 품목"을 갱신할 때
 // ②사용자가 처음 조회하는 품목을 그 자리에서 즉시 캐싱할 때 ③도매가 토글을 처음 켤 때
-// (lib/priceSummary.ts). seCode를 다르게 주면 같은 품목이라도 소매/도매를 별도 슬러그로
-// 캐싱한다 — entry.slug는 호출부에서 이미 가격유형별로 구분된 값을 넘겨준다.
+// (lib/priceSummary.ts). seCode는 KAMIS 품목에만 의미가 있다(축평원은 소매/도매 구분이
+// 없어 무시됨) — entry.slug는 호출부에서 이미 가격유형별로 구분된 값을 넘겨준다.
 export async function syncItem(
-  entry: Pick<BrowsableItem, "slug" | "name" | "category" | "ctgryCode" | "itemCode">,
+  entry: BrowsableItem,
   seCode: string = "01",
 ): Promise<SyncItemResult> {
   const supabase = getSupabaseServerClient();
@@ -31,19 +58,16 @@ export async function syncItem(
   const startDate = toYyyymmdd(addDays(today, -400));
   const endDate = toYyyymmdd(today);
 
-  const rows = await fetchKamisDailyPrices({
-    ctgryCode: entry.ctgryCode,
-    itemCode: entry.itemCode,
-    startDate,
-    endDate,
-    seCode,
-  });
-  const daily = normalizeToDailyPrices(rows);
+  const daily = await fetchDaily(entry, startDate, endDate, seCode);
   if (daily.length === 0) {
-    throw new Error(`${entry.name}: KAMIS 데이터가 없습니다.`);
+    throw new Error(`${entry.name}: 데이터가 없습니다.`);
   }
 
   const unitLabel = daily[daily.length - 1].unit;
+  const sourceParams =
+    entry.source === "kamis"
+      ? { ctgryCode: entry.ctgryCode, itemCode: entry.itemCode, seCode }
+      : { judgeKind: entry.judgeKind, itemCd: entry.itemCd };
 
   const { data: itemRow, error: itemError } = await supabase
     .from("items")
@@ -53,8 +77,8 @@ export async function syncItem(
         name: entry.name,
         category: entry.category,
         unit_label: unitLabel,
-        source: "kamis",
-        source_params: { ctgryCode: entry.ctgryCode, itemCode: entry.itemCode, seCode },
+        source: entry.source,
+        source_params: sourceParams,
         is_active: true,
         last_synced_at: new Date().toISOString(),
       },
@@ -98,7 +122,35 @@ interface ItemRow {
   slug: string;
   name: string;
   category: BrowsableItem["category"];
-  source_params: { ctgryCode: string; itemCode: string; seCode?: string };
+  source: BrowsableItem["source"];
+  source_params: {
+    ctgryCode?: string;
+    itemCode?: string;
+    judgeKind?: string;
+    itemCd?: string;
+    seCode?: string;
+  };
+}
+
+function toBrowsableItem(row: ItemRow): BrowsableItem {
+  if (row.source === "kamis") {
+    return {
+      slug: row.slug,
+      name: row.name,
+      category: row.category,
+      source: "kamis",
+      ctgryCode: row.source_params.ctgryCode!,
+      itemCode: row.source_params.itemCode!,
+    };
+  }
+  return {
+    slug: row.slug,
+    name: row.name,
+    category: row.category,
+    source: "ekape",
+    judgeKind: row.source_params.judgeKind!,
+    itemCd: row.source_params.itemCd!,
+  };
 }
 
 // 활성 품목이 늘어날수록 "한 번에 전부" 갱신하면 함수 제한시간을 넘기기 쉽다
@@ -149,7 +201,7 @@ export async function syncAllActiveItems(): Promise<SyncAllResult> {
 
   const { data: existingItems, error: listError } = await supabase
     .from("items")
-    .select("slug, name, category, source_params")
+    .select("slug, name, category, source, source_params")
     .eq("is_active", true)
     .order("last_synced_at", { ascending: true, nullsFirst: true })
     .limit(BATCH_SIZE);
@@ -160,16 +212,7 @@ export async function syncAllActiveItems(): Promise<SyncAllResult> {
 
   const rows = (existingItems ?? []) as ItemRow[];
   const settled = await mapWithConcurrency(rows, SYNC_CONCURRENCY, (row) =>
-    syncItem(
-      {
-        slug: row.slug,
-        name: row.name,
-        category: row.category,
-        ctgryCode: row.source_params.ctgryCode,
-        itemCode: row.source_params.itemCode,
-      },
-      row.source_params.seCode ?? "01",
-    ),
+    syncItem(toBrowsableItem(row), row.source_params.seCode ?? "01"),
   );
 
   const results: SyncItemResult[] = [];

@@ -8,6 +8,7 @@
 | Supabase 프로젝트 | https://supabase.com | 일별 가격 캐싱 DB | ✅ 완료 |
 | Vercel 계정 + 배포 | https://vercel.com | 배포 + Cron 스케줄 | ✅ 완료 (GitHub 연동, 자동배포, cron 등록) |
 | Google Cloud Vision API | https://console.cloud.google.com | 가격표 촬영 OCR | ✅ 완료 (전용 GCP 프로젝트 `smart-shopping-82693`, 결제 연결, Vision 전용 제한 키) |
+| 축산물품질평가원(EKAPE) API 키 | 공공데이터포털 (KAMIS와 별개로 활용신청 필요) | 삼겹살 등 축산물 소비자가격 수집 | ✅ 완료 |
 
 발급이 필요한 항목은 모두 끝났어요.
 
@@ -22,7 +23,7 @@
 
 ## 3. 진행한 것 (누적)
 
-- KAMIS API 실제 연동 — 축산물은 데이터 0건임을 API로 재확인, 지원 범위는 농산물+수산물 123개
+- KAMIS API 실제 연동 — 축산물은 KAMIS에 데이터 0건임을 API로 재확인(2022년부터 축평원으로 이관됨), 지원 범위는 농산물+수산물 123개
 - 품목 상세 화면: 오늘가격, 백분위 배지, 전년비교, 가격대 게이지, 90일 추이 그래프, 요일별 평균가(토·일 추정), 최근 90일 최저가
 - Supabase 연동 — 조직/프로젝트 CLI로 생성(서울 리전), `supabase/migrations/`로 스키마 관리 (`items`, `daily_prices`, `sync_runs`)
 - Vercel 배포 — GitHub push 시 자동배포, 환경변수(KAMIS/Supabase/CRON_SECRET/Vision) 3개 환경 모두 등록
@@ -55,14 +56,24 @@
 
 ## 5. PWA 설치 지원 추가
 
-- 아이콘: "가격표 태그 + 체크마크"(가격이 괜찮은지 확인해준다는 컨셉) 디자인, `scripts/icon-source.svg`(일반용)·`scripts/icon-maskable-source.svg`(Android 마스커블용, 세이프존 고려)가 원본. `npm i -D sharp` 후 이 SVG를 재편집하고 다시 PNG로 뽑으면 아이콘 교체 가능
+- 아이콘: "가격 게이지(저렴~비쌈 계기판) + 바늘" 디자인 — 앱 안의 실제 가격대 게이지 UI와 동일한 모양으로 직관성을 높임. `scripts/icon-source.svg`(일반용)·`scripts/icon-maskable-source.svg`(Android 마스커블용, 세이프존 고려)가 원본. `npm i -D sharp` 후 이 SVG를 재편집하고 다시 PNG로 뽑으면 아이콘 교체 가능
 - `src/app/manifest.ts` — Next.js App Router의 manifest 특수 파일로 `/manifest.webmanifest` 자동 생성 (이름/아이콘/standalone 모드 등)
 - `src/app/icon.png`, `src/app/apple-icon.png` — Next.js가 자동으로 `<link rel="icon">`, `<link rel="apple-touch-icon">` 태그 생성
 - `public/sw.js` + `src/components/ServiceWorkerRegister.tsx` — Chrome의 PWA 설치 조건(등록된 서비스워커) 충족용 최소 구현. 가격 데이터가 자주 바뀌므로 오프라인 캐싱은 하지 않음
 - 로컬에서 매니페스트/아이콘/서비스워커 등록까지 확인 완료. 실기기(안드로이드 Chrome "홈 화면에 추가", iOS Safari "홈 화면에 추가")에서의 설치 동작은 배포 후 직접 확인 필요
 
-## 6. 추천하는 다음 순서
+## 6. 축평원(축산물) 연동
 
-1. 축평원(축산물) 연동 검토
+- `src/lib/ekapeCatalog.ts` — 축산물품질평가원 "일자별 축산물소비자가격" API의 공식 활용가이드에 명시된 축종/품목코드만 등록 (소/돼지/수입소고기/수입돼지고기/우유 — 삼겹살, 안심, 목살, 흰우유 등). 닭·계란은 품목코드 체계가 문서에 없어 제외
+- `src/lib/ekape/client.ts` — KAMIS와 달리 **기간 조회가 안 되고 하루당 1회 호출**해야 하는 API라, 지정한 기간(400일)만큼 날짜별로 개별 요청해서 모음 (동시성 8, 개별 날짜 실패는 건너뛰고 계속 진행). 응답이 XML이라 `fast-xml-parser` 사용, HTTPS 미지원 서버라 HTTP로만 통신
+- `src/lib/catalog.ts`를 KAMIS/EKAPE 두 소스를 아우르는 판별 유니온(discriminated union)으로 재구성 — 슬러그는 `ekape-{judgeKind}-{itemCd}` 형태로 KAMIS와 구분
+- 도매가 토글은 축산물 품목엔 안 보이게 처리 (축평원 API는 소비자가격 하나만 제공, 소매/도매 구분 없음)
+- **버그 발견 및 수정**: 축평원은 KAMIS와 달리 **주말에도 실제로 조사**함(직접 확인). 기존 요일별 평균가 로직이 무조건 토·일을 "추정"으로 처리하던 걸, 실측 데이터가 있으면 그대로 쓰고 없을 때만 추정하도록 `stats.ts`의 `weekdayAverages`를 수정 (`estimated` 플래그로 구분)
+- fast-xml-parser 관련 버그: 기본 설정(`parseTagValue: true`)이 응답의 `resultCode: "00"`을 숫자 `0`으로 바꿔버려 정상 응답을 오류로 오판하는 문제 발견 → `parseTagValue: false`로 해결
+- 실제로 삼겹살(축평원) 최초 조회 테스트 완료 — 로컬에서 약 26초 소요 (400일 × 1개씩 호출이라 KAMIS보다 느림, 이후 방문은 캐시라 빠름)
+
+## 7. 추천하는 다음 순서
+
+1. 축평원 연동이 프로덕션(60초 함수 제한시간)에서도 안정적인지 실사용 확인 — 이 API가 KAMIS보다 느리고 가끔 타임아웃되는 걸 확인했어서, 필요시 축산물 품목만 400일 대신 90일로 백필 범위를 줄이는 것도 고려
 2. OCR/검색 매칭 정확도 개선 (품목이 더 늘어날 경우 자모 단위 매칭 등)
 3. 계절성 품목의 "작년 라인 데이터 없음" 케이스 보완 (필요시 해당 품목만 더 넓게 백필)

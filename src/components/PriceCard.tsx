@@ -135,23 +135,28 @@ export default function PriceCard({
     }
   }
 
+  // 축평원(축산물) 품목은 소매/도매 구분 없이 소비자가격 하나만 제공하므로 토글 자체를 숨긴다.
+  const supportsWholesale = initialSummary.item.source === "kamis";
+
   return (
     <div className="bg-surface rounded-2xl px-6 py-6 shadow-2xl">
       <div className="flex items-baseline justify-between mb-1">
         <h1 className="text-lg font-bold">{itemName}</h1>
-        <div className="flex rounded-full bg-ink/10 p-0.5 text-[11px]">
-          {(["retail", "wholesale"] as const).map((type) => (
-            <button
-              key={type}
-              onClick={() => handleToggle(type)}
-              className={`px-2.5 py-1 rounded-full transition ${
-                priceType === type ? "bg-surface text-ink font-bold shadow" : "text-ink-dim"
-              }`}
-            >
-              {type === "retail" ? "소매가" : "도매가"}
-            </button>
-          ))}
-        </div>
+        {supportsWholesale && (
+          <div className="flex rounded-full bg-ink/10 p-0.5 text-[11px]">
+            {(["retail", "wholesale"] as const).map((type) => (
+              <button
+                key={type}
+                onClick={() => handleToggle(type)}
+                className={`px-2.5 py-1 rounded-full transition ${
+                  priceType === type ? "bg-surface text-ink font-bold shadow" : "text-ink-dim"
+                }`}
+              >
+                {type === "retail" ? "소매가" : "도매가"}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {!summary && loading && (
@@ -250,13 +255,16 @@ export default function PriceCard({
             <h2 className="text-sm font-bold mb-2">요일별 평균가 (최근 3개월)</h2>
             <div className="grid grid-cols-7 gap-1 items-end h-24">
               {(["월", "화", "수", "목", "금", "토", "일"] as const).map((day) => {
-                const isEstimated = day === "토" || day === "일";
-                const value = isEstimated
-                  ? summary.weekday.estimated[day]
+                const isWeekend = day === "토" || day === "일";
+                const weekendInfo = isWeekend ? summary.weekday.weekend[day as "토" | "일"] : null;
+                const isEstimated = weekendInfo?.estimated ?? false;
+                const value = weekendInfo
+                  ? weekendInfo.value
                   : summary.weekday.actual[day as "월" | "화" | "수" | "목" | "금"];
                 const allValues = [
                   ...Object.values(summary.weekday.actual),
-                  ...Object.values(summary.weekday.estimated),
+                  summary.weekday.weekend.토.value,
+                  summary.weekday.weekend.일.value,
                 ];
                 const max = Math.max(...allValues);
                 const isCheapest = summary.weekday.cheapestDay === day;
@@ -273,10 +281,11 @@ export default function PriceCard({
                 );
               })}
             </div>
-            <p className="text-[11px] text-ink-dim mt-2">
-              토·일은 KAMIS가 조사하지 않아 금·월 평균으로 추정한 값이며, 실제 조사값이
-              아닙니다.
-            </p>
+            {(summary.weekday.weekend.토.estimated || summary.weekday.weekend.일.estimated) && (
+              <p className="text-[11px] text-ink-dim mt-2">
+                토·일은 조사하지 않아 금·월 평균으로 추정한 값이며, 실제 조사값이 아닙니다.
+              </p>
+            )}
           </div>
 
           <div className="bg-cheap-soft rounded-xl px-4 py-3 mb-4">
@@ -288,8 +297,9 @@ export default function PriceCard({
           </div>
 
           <p className="text-[11px] text-ink-dim border-t border-rule pt-3">
-            KAMIS {priceType === "wholesale" ? "중도매(도매)가격" : "소매가격"} 기준 · 주말·공휴일은
-            조사하지 않아 추이·요일 비교에서 제외/추정 처리됨
+            {summary.item.source === "ekape"
+              ? "축산물품질평가원 소비자가격 기준 · 주말에도 조사되어 요일 비교에 실제값을 사용함(공휴일 등 일부는 없을 수 있음)"
+              : `KAMIS ${priceType === "wholesale" ? "중도매(도매)가격" : "소매가격"} 기준 · 주말·공휴일은 조사하지 않아 추이·요일 비교에서 제외/추정 처리됨`}
           </p>
         </>
       )}

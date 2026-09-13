@@ -19,7 +19,14 @@ import {
 export type PriceType = "retail" | "wholesale";
 
 export interface PriceSummary {
-  item: { id: string; name: string; category: string; unit: string; priceType: PriceType };
+  item: {
+    id: string;
+    name: string;
+    category: string;
+    unit: string;
+    priceType: PriceType;
+    source: BrowsableItem["source"];
+  };
   today: { date: string; price: number };
   percentile: PercentileBadge;
   range90: PriceRange;
@@ -45,6 +52,10 @@ export async function getPriceSummary(
   entry: BrowsableItem,
   priceType: PriceType = "retail",
 ): Promise<PriceSummary> {
+  if (priceType === "wholesale" && entry.source === "ekape") {
+    throw new Error(`"${entry.name}"은(는) 도매가를 제공하지 않습니다.`);
+  }
+
   const supabase = getSupabaseServerClient();
   const cacheSlug = cacheSlugOf(entry, priceType);
 
@@ -94,6 +105,7 @@ export async function getPriceSummary(
       category: entry.category,
       unit: itemRow.unit_label,
       priceType,
+      source: entry.source,
     },
     today: { date: latest.date, price: latest.price },
     percentile: percentileBadge(window90, latest.price),
