@@ -55,7 +55,12 @@ export async function syncItem(
   const supabase = getSupabaseServerClient();
 
   const today = new Date();
-  const startDate = toYyyymmdd(addDays(today, -400));
+  // 축평원(ekape)은 KAMIS처럼 기간 조회가 안 되고 날짜별로 1건씩 호출해야 해서
+  // 훨씬 느리다 — 실측: 400일 백필 시 서울 리전에서도 45초 넘게 걸려 함수 제한시간
+  // (60초)에 너무 가까웠음. 그래서 ekape는 100일만 백필한다(작년 비교/작년 점선
+  // 라인은 데이터 부족으로 자연히 생략됨 — 계절성 품목과 같은 트레이드오프).
+  const backfillDays = entry.source === "ekape" ? 100 : 400;
+  const startDate = toYyyymmdd(addDays(today, -backfillDays));
   const endDate = toYyyymmdd(today);
 
   const daily = await fetchDaily(entry, startDate, endDate, seCode);
